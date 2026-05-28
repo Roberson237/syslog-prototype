@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Syslog Analysis</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:         #0d1117;
+  --surface:    #161b22;
+  --surface2:   #1c2128;
+  --surface3:   #21262d;
+  --border:     #30363d;
+  --border2:    #3d444d;
+  --text:       #e6edf3;
+  --muted:      #7d8590;
+  --primary:    #58a6ff;
+  --primary-dim:#1f4068;
+  --success:    #3fb950;
+  --success-dim:#0d3320;
+  --warning:    #d29922;
+  --warning-dim:#3d2f00;
+  --danger:     #f85149;
+  --danger-dim: #3d0d0a;
+  --font-mono:  'JetBrains Mono', monospace;
+  --font-ui:    'Outfit', sans-serif;
+  --radius:     8px;
+  --radius-lg:  12px;
+  --shadow:     0 4px 24px rgba(0,0,0,.4);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+body { font-family: var(--font-ui); background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+button { cursor: pointer; font-family: inherit; }
+a { text-decoration: none; color: inherit; }
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* TOPBAR */
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; height: 52px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; gap: 12px; }
+.topbar-left  { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1rem; letter-spacing: -0.02em; }
+.logo-icon { width: 28px; height: 28px; background: linear-gradient(135deg, var(--primary), #8b5cf6); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 0.82rem; font-weight: 600; font-family: var(--font-ui); color: var(--text); background: var(--surface2); transition: all .15s; white-space: nowrap; }
+.btn:hover { background: var(--surface3); border-color: var(--border2); }
+.btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn-primary:hover { opacity: .9; }
+
+/* MAIN */
+.main { flex: 1; padding: 20px; max-width: 1440px; margin: 0 auto; width: 100%; }
+
+/* STATS */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; align-items: center; gap: 14px; transition: border-color .2s, transform .2s; }
+.stat-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+.stat-icon { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.stat-icon.analyzed { background: #1a2332; }
+.stat-icon.critical { background: var(--danger-dim); }
+.stat-icon.sources  { background: #0d2137; }
+.stat-icon.deep     { background: #1a1a2e; }
+.stat-info  { flex: 1; min-width: 0; }
+.stat-value { font-size: 1.8rem; font-weight: 700; line-height: 1; font-family: var(--font-mono); }
+.stat-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
+.stat-card.critical .stat-value { color: var(--danger); }
+.stat-card.sources  .stat-value { color: var(--primary); }
+
+/* FILTERS */
+.filters-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.filter-group { display: flex; flex-direction: column; gap: 4px; }
+.filter-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+select, input[type="text"] { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 7px 10px; font-family: var(--font-ui); font-size: 0.85rem; outline: none; transition: border-color .2s; }
+select:focus, input[type="text"]:focus { border-color: var(--primary); }
+select { cursor: pointer; min-width: 160px; }
+input[type="text"] { min-width: 280px; }
+.filter-actions { display: flex; gap: 8px; margin-left: auto; align-items: flex-end; }
+
+/* CHARTS ROW */
+.charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
+.chart-title { font-size: 0.85rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 20px; }
+
+/* DONUT */
+.donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.donut-svg  { width: 160px; height: 160px; }
+.donut-legend { display: flex; flex-wrap: wrap; gap: 10px 20px; justify-content: center; }
+.legend-item  { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); }
+.legend-dot   { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+/* ANALYSIS DEPTH BARS */
+.depth-wrap { display: flex; flex-direction: column; gap: 18px; }
+.depth-row  { display: flex; flex-direction: column; gap: 6px; }
+.depth-row-header { display: flex; align-items: center; justify-content: space-between; }
+.depth-sev-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono); }
+.depth-sev-info     { background: #0d2137; color: var(--primary); }
+.depth-sev-warning  { background: var(--warning-dim); color: var(--warning); }
+.depth-sev-critical { background: var(--danger-dim);  color: var(--danger); }
+.depth-row-meta { display: flex; align-items: center; gap: 8px; }
+.depth-count { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; }
+.model-pill { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 10px; font-size: 0.65rem; font-weight: 700; font-family: var(--font-mono); border: 1px solid; white-space: nowrap; }
+.model-pill.info     { border-color: var(--primary); color: var(--primary); background: #0d2137; }
+.model-pill.warning  { border-color: var(--warning); color: var(--warning); background: var(--warning-dim); }
+.model-pill.critical { border-color: var(--danger);  color: var(--danger);  background: var(--danger-dim); }
+.depth-bar-track { height: 10px; background: var(--surface3); border-radius: 10px; overflow: hidden; }
+.depth-bar-fill  { height: 100%; border-radius: 10px; transition: width .7s cubic-bezier(.4,0,.2,1); min-width: 0; }
+.depth-bar-fill.info     { background: linear-gradient(90deg, #58a6ff, #1f6feb); }
+.depth-bar-fill.warning  { background: linear-gradient(90deg, var(--warning), #9a6700); }
+.depth-bar-fill.critical { background: linear-gradient(90deg, var(--danger), #b91c1c); }
+.depth-legend { display: flex; gap: 12px; flex-wrap: wrap; padding-top: 16px; border-top: 1px solid var(--border); margin-top: 4px; }
+.depth-legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.72rem; color: var(--muted); }
+
+/* LOGS */
+.logs-card    { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.logs-toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.logs-toolbar-title { font-size: 1rem; font-weight: 700; }
+.logs-count   { font-size: 0.75rem; color: var(--muted); font-family: var(--font-mono); }
+.toolbar-right { margin-left: auto; display: flex; gap: 8px; }
+
+.log-entries { }
+.log-entry {
+  border-bottom: 1px solid var(--border);
+  padding: 14px 20px;
+  display: flex; gap: 16px; align-items: flex-start;
+  transition: background .1s;
+  animation: fadeIn .25s ease;
+}
+@keyframes fadeIn { from { opacity:0; transform:translateY(3px); } to { opacity:1; transform:none; } }
+.log-entry:hover   { background: var(--surface2); }
+.log-entry:last-child { border-bottom: none; }
+.log-left  { flex: 1; min-width: 0; }
+.log-ts    { font-size: 0.72rem; color: var(--muted); font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; padding-top: 2px; }
+
+/* Badges */
+.sev-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+.sev-info     { background: #0d2137; color: var(--primary); }
+.sev-warning  { background: var(--warning-dim); color: var(--warning); }
+.sev-critical { background: var(--danger-dim);  color: var(--danger); }
+.sev-pending  { background: var(--surface3);    color: var(--muted); }
+
+.depth-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+.depth-quick    { background: #1a2d1a; color: #4ade80; border: 1px solid #2d5a2d; }
+.depth-standard { background: #1f2d3d; color: var(--primary); border: 1px solid #2a4a6b; }
+.depth-deep     { background: #2d1a2d; color: #c084fc; border: 1px solid #5a2d5a; }
+
+.cat-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; font-family: var(--font-mono); color: var(--muted); background: var(--surface3); }
+
+.log-badges { display: flex; gap: 6px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; }
+.log-msg-raw { font-family: var(--font-mono); font-size: 0.78rem; background: var(--surface2); padding: 8px 12px; border-radius: var(--radius); border: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 8px; }
+
+/* Summary box inline */
+.log-content-row { display: flex; gap: 10px; align-items: stretch; }
+.log-msg-wrap    { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; }
+.log-summary-box { flex: 0 0 42%; max-width: 42%; min-width: 180px; border-radius: 0 var(--radius) var(--radius) 0; padding: 10px 14px; font-size: 0.82rem; line-height: 1.6; border-left: 3px solid; }
+.log-summary-box.info     { background: var(--primary-dim); border-color: var(--primary); }
+.log-summary-box.warning  { background: var(--warning-dim); border-color: var(--warning); }
+.log-summary-box.critical { background: var(--danger-dim);  border-color: var(--danger); }
+.log-summary-box.pending  { background: var(--surface3);    border-color: var(--muted); }
+.log-summary-label { font-weight: 700; margin-right: 5px; }
+.log-summary-box.info     .log-summary-label { color: var(--primary); }
+.log-summary-box.warning  .log-summary-label { color: var(--warning); }
+.log-summary-box.critical .log-summary-label { color: var(--danger); }
+.log-summary-box.pending  .log-summary-label { color: var(--muted); }
+
+/* Skeleton */
+.skeleton-entry { border-bottom: 1px solid var(--border); padding: 16px 20px; }
+.skeleton-line  { height: 11px; border-radius: 4px; background: linear-gradient(90deg,var(--surface2) 25%,var(--surface3) 50%,var(--surface2) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; margin-bottom: 8px; }
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+.empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+.empty-icon  { font-size: 2.5rem; margin-bottom: 12px; opacity: .4; }
+.empty-text  { font-size: 0.9rem; }
+
+/* RESPONSIVE */
+@media (max-width:1100px) { .stats-grid{grid-template-columns:repeat(2,1fr);} .charts-row{grid-template-columns:1fr;} .log-summary-box{max-width:100%;flex:none;} .log-content-row{flex-direction:column;} }
+@media (max-width:768px)  { .main{padding:12px;} .stats-grid{grid-template-columns:repeat(2,1fr);} input[type="text"]{min-width:140px;} .filter-actions{margin-left:0;width:100%;justify-content:flex-end;} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo"><div class="logo-icon">📊</div>Syslog Analysis</div>
+    </div>
+    <div class="topbar-right">
+      <a href="/" class="btn">← Back to Logs</a>
+      <button class="btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon analyzed">📋</div>
+        <div class="stat-info"><div class="stat-value" id="statAnalyzed">—</div><div class="stat-label">Analyzed</div></div>
+      </div>
+      <div class="stat-card critical">
+        <div class="stat-icon critical">⚠</div>
+        <div class="stat-info"><div class="stat-value" id="statCritical">—</div><div class="stat-label">Critical</div></div>
+      </div>
+      <div class="stat-card sources">
+        <div class="stat-icon sources">🌐</div>
+        <div class="stat-info"><div class="stat-value" id="statSources">—</div><div class="stat-label">Sources</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon deep">🤖</div>
+        <div class="stat-info"><div class="stat-value" id="statDeep">—</div><div class="stat-label">Deep Analysis</div></div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters-bar">
+      <div class="filter-group">
+        <div class="filter-label">Time Range</div>
+        <select id="fTime" onchange="onTimeChange()">
+          <option value="1">Last Hour</option>
+          <option value="24" selected>Last 24 Hours</option>
+          <option value="168">Last Week</option>
+          <option value="720">Last Month</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Severity</div>
+        <select id="fSeverity" onchange="renderFiltered()">
+          <option value="">All</option>
+          <option value="info">Info</option>
+          <option value="warning">Warning</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Search Analysis</div>
+        <input type="text" id="fSearch" placeholder="Search in messages, description, resolution..." oninput="debounceFilter()">
+      </div>
+      <div class="filter-actions">
+        <button class="btn btn-primary" onclick="renderFiltered()">Apply</button>
+        <button class="btn" onclick="resetFilters()">Reset</button>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-row">
+      <!-- Donut -->
+      <div class="chart-card">
+        <div class="chart-title">Severity Distribution</div>
+        <div class="donut-wrap">
+          <svg class="donut-svg" viewBox="0 0 160 160">
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#21262d" stroke-width="24"/>
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#3fb950" stroke-width="24" stroke-dasharray="377" stroke-dashoffset="0"   stroke-linecap="butt" transform="rotate(-90 80 80)" id="donutInfo"/>
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#d29922" stroke-width="24" stroke-dasharray="0"   stroke-dashoffset="377" stroke-linecap="butt" transform="rotate(-90 80 80)" id="donutWarning"/>
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#f85149" stroke-width="24" stroke-dasharray="0"   stroke-dashoffset="377" stroke-linecap="butt" transform="rotate(-90 80 80)" id="donutCritical"/>
+            <text x="80" y="76" text-anchor="middle" fill="#e6edf3" font-size="22" font-weight="700" font-family="JetBrains Mono,monospace" id="donutTotal">—</text>
+            <text x="80" y="94" text-anchor="middle" fill="#7d8590" font-size="10" font-family="Outfit,sans-serif">TOTAL</text>
+          </svg>
+          <div class="donut-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Info</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#d29922"></div>Warning</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Critical</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Analysis Depth -->
+      <div class="chart-card">
+        <div class="chart-title">Analysis Depth</div>
+        <div class="depth-wrap">
+          <!-- INFO -->
+          <div class="depth-row">
+            <div class="depth-row-header">
+              <div class="depth-row-meta">
+                <span class="depth-sev-badge depth-sev-info">INFO</span>
+                <span class="depth-badge depth-quick">QUICK</span>
+              </div>
+              <div class="depth-row-meta">
+                <span class="depth-count" id="depthCountInfo" style="color:var(--primary)">—</span>
+                <span class="model-pill info">🤖 llama3:8b</span>
+              </div>
+            </div>
+            <div class="depth-bar-track"><div class="depth-bar-fill info" id="depthBarInfo" style="width:0%"></div></div>
+          </div>
+          <!-- WARNING -->
+          <div class="depth-row">
+            <div class="depth-row-header">
+              <div class="depth-row-meta">
+                <span class="depth-sev-badge depth-sev-warning">WARNING</span>
+                <span class="depth-badge depth-standard">STANDARD</span>
+              </div>
+              <div class="depth-row-meta">
+                <span class="depth-count" id="depthCountWarning" style="color:var(--warning)">—</span>
+                <span class="model-pill warning">🤖 llama3:70b</span>
+              </div>
+            </div>
+            <div class="depth-bar-track"><div class="depth-bar-fill warning" id="depthBarWarning" style="width:0%"></div></div>
+          </div>
+          <!-- CRITICAL -->
+          <div class="depth-row">
+            <div class="depth-row-header">
+              <div class="depth-row-meta">
+                <span class="depth-sev-badge depth-sev-critical">CRITICAL</span>
+                <span class="depth-badge depth-deep">DEEP</span>
+              </div>
+              <div class="depth-row-meta">
+                <span class="depth-count" id="depthCountCritical" style="color:var(--danger)">—</span>
+                <span class="model-pill critical">🤖 deepseek</span>
+              </div>
+            </div>
+            <div class="depth-bar-track"><div class="depth-bar-fill critical" id="depthBarCritical" style="width:0%"></div></div>
+          </div>
+          <!-- Légende -->
+          <div class="depth-legend">
+            <div class="depth-legend-item"><span class="model-pill info" style="font-size:.6rem">🤖 llama3:8b</span> Quick — événements normaux</div>
+            <div class="depth-legend-item"><span class="model-pill warning" style="font-size:.6rem">🤖 llama3:70b</span> Standard — anomalies</div>
+            <div class="depth-legend-item"><span class="model-pill critical" style="font-size:.6rem">🤖 deepseek</span> Deep — incidents critiques</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Analyzed Logs -->
+    <div class="logs-card">
+      <div class="logs-toolbar">
+        <div class="logs-toolbar-title">Analyzed Logs</div>
+        <span class="logs-count" id="logsCount"></span>
+        <div class="toolbar-right">
+          <button class="btn" onclick="loadAnalysis()">↻ Refresh</button>
+        </div>
+      </div>
+      <div id="logEntries">
+        <div class="skeleton-entry"><div class="skeleton-line" style="width:28%;margin-bottom:10px"></div><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:58%"></div></div>
+        <div class="skeleton-entry"><div class="skeleton-line" style="width:22%;margin-bottom:10px"></div><div class="skeleton-line" style="width:91%"></div><div class="skeleton-line" style="width:47%"></div></div>
+        <div class="skeleton-entry"><div class="skeleton-line" style="width:35%;margin-bottom:10px"></div><div class="skeleton-line" style="width:74%"></div><div class="skeleton-line" style="width:66%"></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────────
+const MODEL_BY_SEV  = { info:'llama3:8b', warning:'llama3:70b', critical:'deepseek' };
+const DEPTH_LABEL   = { info:'QUICK', warning:'STANDARD', critical:'DEEP' };
+const DEPTH_CSS     = { info:'depth-quick', warning:'depth-standard', critical:'depth-deep' };
+
+// ── State ──────────────────────────────────────────────────────────────────────
+// allLogs = tous les logs chargés depuis l'API pour la période courante
+// Le filtrage sévérité + search se fait entièrement côté client → instantané, pas de flash
+let allLogs     = [];
+let currentHours = '24';
+
+// ── Theme ──────────────────────────────────────────────────────────────────────
+let isDark = localStorage.getItem('analysisTheme') !== 'light';
+function toggleTheme() { isDark=!isDark; applyTheme(); localStorage.setItem('analysisTheme',isDark?'dark':'light'); }
+function applyTheme() {
+  const r = document.documentElement;
+  r.style.setProperty('--bg',       isDark?'#0d1117':'#f0f2f5');
+  r.style.setProperty('--surface',  isDark?'#161b22':'#ffffff');
+  r.style.setProperty('--surface2', isDark?'#1c2128':'#f6f8fa');
+  r.style.setProperty('--surface3', isDark?'#21262d':'#eaecef');
+  r.style.setProperty('--border',   isDark?'#30363d':'#d0d7de');
+  r.style.setProperty('--border2',  isDark?'#3d444d':'#b0b7be');
+  r.style.setProperty('--text',     isDark?'#e6edf3':'#1f2328');
+  r.style.setProperty('--muted',    isDark?'#7d8590':'#656d76');
+  document.getElementById('themeBtn').textContent = isDark?'🌙':'☀️';
+}
+applyTheme();
+
+// ── Utils ──────────────────────────────────────────────────────────────────────
+function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtDateTime(ts) {
+  return new Date(ts).toLocaleString('fr-FR', { day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit' });
+}
+function sevBadge(c) {
+  if (!c) return `<span class="sev-badge sev-pending">PENDING</span>`;
+  return `<span class="sev-badge sev-${c}">${c.toUpperCase()}</span>`;
+}
+function depthBadge(c) {
+  if (!c) return '';
+  return `<span class="depth-badge ${DEPTH_CSS[c]||'depth-quick'}">${DEPTH_LABEL[c]||'QUICK'}</span>`;
+}
+function modelPill(c) {
+  const m = MODEL_BY_SEV[c]||'llama3:8b';
+  return `<span class="model-pill ${c||'info'}">🤖 ${escHtml(m)}</span>`;
+}
+function catBadge(msg) {
+  const m = (msg||'').toLowerCase();
+  if (m.includes('ssh')||m.includes('auth')||m.includes('login'))               return 'auth';
+  if (m.includes('openvpn')||m.includes('ike')||m.includes('vpn')||m.includes('enc')) return 'vpn';
+  if (m.includes('interface')||m.includes('bgp')||m.includes('ospf'))           return 'network';
+  if (m.includes('sql')||m.includes('injection')||m.includes('blocked')||m.includes('firewall')) return 'security';
+  if (m.includes('cpu')||m.includes('disk')||m.includes('memory'))              return 'system';
+  return 'syslog';
+}
+
+// ── Render d'une entrée ────────────────────────────────────────────────────────
+function renderEntry(log) {
+  const c = log.classification;
+  let summaryHtml = '';
+
+  if (!log.analyzed || !c) {
+    summaryHtml = `<div class="log-summary-box pending"><span class="log-summary-label">Pending:</span>En attente du prochain batch (toutes les 5 min).</div>`;
+  } else if (c === 'info') {
+    summaryHtml = `<div class="log-summary-box info"><span class="log-summary-label">Quick Summary:</span>${escHtml(log.description||'Normal event — no action required.')}</div>`;
+  } else if (c === 'warning') {
+    summaryHtml = `<div class="log-summary-box warning">
+      <span class="log-summary-label">Standard Analysis:</span>${escHtml(log.description||'Anomaly detected.')}
+      ${log.resolution?`<br><span style="color:var(--success);font-weight:700">Fix: </span>${escHtml(log.resolution)}`:''}
+    </div>`;
+  } else {
+    summaryHtml = `<div class="log-summary-box critical">
+      <span class="log-summary-label">Deep Analysis:</span>${escHtml(log.description||'Critical incident.')}
+      ${log.resolution?`<br><span style="color:var(--success);font-weight:700">Remediation: </span>${escHtml(log.resolution)}`:''}
+    </div>`;
+  }
+
+  return `<div class="log-entry" data-id="${log._id}">
+    <div class="log-left">
+      <div class="log-badges">
+        ${sevBadge(c)}
+        ${c?depthBadge(c):''}
+        ${c?modelPill(c):''}
+        <span class="cat-badge">${catBadge(log.message)}</span>
+      </div>
+      <div class="log-content-row">
+        <div class="log-msg-wrap">
+          <div class="log-msg-raw" title="${escHtml(log.message||'')}">${escHtml(log.message||'—')}</div>
+        </div>
+        ${summaryHtml}
+      </div>
+    </div>
+    <div class="log-ts">${fmtDateTime(log.timestamp)}</div>
+  </div>`;
+}
+
+// ── Render filtré côté client (instantané) ─────────────────────────────────────
+function renderFiltered() {
+  const sevFilter    = document.getElementById('fSeverity').value;
+  const searchFilter = document.getElementById('fSearch').value.toLowerCase().trim();
+
+  const filtered = allLogs.filter(log => {
+    if (sevFilter && log.classification !== sevFilter) return false;
+    if (searchFilter) {
+      const hay = [log.message||'', log.description||'', log.resolution||'', log.source||''].join(' ').toLowerCase();
+      if (!hay.includes(searchFilter)) return false;
+    }
+    return true;
+  });
+
+  const container = document.getElementById('logEntries');
+  const count     = document.getElementById('logsCount');
+
+  if (!filtered.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Aucun log ne correspond aux filtres.</div></div>`;
+    count.textContent = '';
+    return;
+  }
+  count.textContent = `${filtered.length} log${filtered.length>1?'s':''}`;
+  container.innerHTML = filtered.map(renderEntry).join('');
+}
+
+let debTimer = null;
+function debounceFilter() { clearTimeout(debTimer); debTimer = setTimeout(renderFiltered, 220); }
+
+// ── Chargement API (uniquement quand la période change) ────────────────────────
+async function loadAnalysis() {
+  const container = document.getElementById('logEntries');
+  container.innerHTML = `
+    <div class="skeleton-entry"><div class="skeleton-line" style="width:28%;margin-bottom:10px"></div><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:55%"></div></div>
+    <div class="skeleton-entry"><div class="skeleton-line" style="width:22%;margin-bottom:10px"></div><div class="skeleton-line" style="width:91%"></div><div class="skeleton-line" style="width:47%"></div></div>
+    <div class="skeleton-entry"><div class="skeleton-line" style="width:35%;margin-bottom:10px"></div><div class="skeleton-line" style="width:74%"></div><div class="skeleton-line" style="width:66%"></div></div>`;
+
+  await loadStats();
+
+  try {
+    // Charge tous les logs analysés pour la période — pas de filtre sévérité côté serveur
+    const params = new URLSearchParams({ hours: currentHours, limit: 500 });
+    const res    = await fetch(`/api/analysis?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allLogs = await res.json();
+    renderFiltered();
+  } catch(err) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><div class="empty-text" style="color:var(--danger)">Erreur : ${escHtml(err.message)}</div></div>`;
+  }
+}
+
+function onTimeChange() {
+  const newHours = document.getElementById('fTime').value;
+  if (newHours !== currentHours) { currentHours = newHours; loadAnalysis(); }
+}
+
+function resetFilters() {
+  document.getElementById('fTime').value     = '24';
+  document.getElementById('fSeverity').value = '';
+  document.getElementById('fSearch').value   = '';
+  currentHours = '24';
+  loadAnalysis();
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const s = await (await fetch('/api/stats')).json();
+    document.getElementById('statAnalyzed').textContent = s.analyzed ?? '—';
+    document.getElementById('statCritical').textContent = s.critical ?? '—';
+    document.getElementById('statSources').textContent  = s.sources  ?? '—';
+    document.getElementById('statDeep').textContent     = s.deep     ?? '0';
+    updateDonut(s);
+    updateDepthBars(s);
+  } catch(e) {}
+}
+
+function updateDonut(s) {
+  const total = s.analyzed || 1;
+  const circ  = 2 * Math.PI * 60;
+  const info  = (s.info||0)/total*circ, warn=(s.warning||0)/total*circ, crit=(s.critical||0)/total*circ;
+  document.getElementById('donutTotal').textContent = s.analyzed || 0;
+  document.getElementById('donutInfo').setAttribute('stroke-dasharray',    `${info} ${circ-info}`);
+  document.getElementById('donutInfo').setAttribute('stroke-dashoffset',   '0');
+  document.getElementById('donutWarning').setAttribute('stroke-dasharray', `${warn} ${circ-warn}`);
+  document.getElementById('donutWarning').setAttribute('stroke-dashoffset',`${circ-info}`);
+  document.getElementById('donutCritical').setAttribute('stroke-dasharray',`${crit} ${circ-crit}`);
+  document.getElementById('donutCritical').setAttribute('stroke-dashoffset',`${circ-info-warn}`);
+}
+
+function updateDepthBars(s) {
+  const i = s.info||0, w = s.warning||0, c = s.critical||0;
+  const maxVal = Math.max(i, w, c, 1);
+  const pct = v => Math.max(v>0?3:0, Math.round(v/maxVal*100));
+  requestAnimationFrame(() => {
+    document.getElementById('depthBarInfo').style.width     = pct(i)+'%';
+    document.getElementById('depthBarWarning').style.width  = pct(w)+'%';
+    document.getElementById('depthBarCritical').style.width = pct(c)+'%';
+  });
+  document.getElementById('depthCountInfo').textContent     = i;
+  document.getElementById('depthCountWarning').textContent  = w;
+  document.getElementById('depthCountCritical').textContent = c;
+}
+
+// ── Socket.IO — mises à jour temps réel ────────────────────────────────────────
+try {
+  const socket = io({ transports: ['websocket','polling'] });
+
+  socket.on('log_updated', (log) => {
+    loadStats();
+    const idx = allLogs.findIndex(l => l._id === log._id);
+    if (idx !== -1) {
+      allLogs[idx] = log;
+    } else {
+      allLogs.unshift(log);
+    }
+    // Re-render filtré instantané
+    renderFiltered();
+    // Flash discret sur l'entrée mise à jour
+    const el = document.querySelector(`.log-entry[data-id="${log._id}"]`);
+    if (el) { el.style.transition='background .3s'; el.style.background='rgba(88,166,255,0.1)'; setTimeout(()=>{ el.style.background=''; },1800); }
+  });
+} catch(e) {}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+loadAnalysis();
+setInterval(loadStats,    30000);
+setInterval(loadAnalysis, 120000);
+</script>
+</body>
+</html>

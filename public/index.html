@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Syslog Collector v2.0</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:         #0d1117;
+  --surface:    #161b22;
+  --surface2:   #1c2128;
+  --surface3:   #21262d;
+  --border:     #30363d;
+  --border2:    #3d444d;
+  --text:       #e6edf3;
+  --muted:      #7d8590;
+  --primary:    #58a6ff;
+  --primary-dim:#1f4068;
+  --success:    #3fb950;
+  --success-dim:#0d3320;
+  --warning:    #d29922;
+  --warning-dim:#3d2f00;
+  --danger:     #f85149;
+  --danger-dim: #3d0d0a;
+  --font-mono:  'JetBrains Mono', monospace;
+  --font-ui:    'Outfit', sans-serif;
+  --radius:     8px;
+  --radius-lg:  12px;
+  --shadow:     0 4px 24px rgba(0,0,0,.4);
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 14px; }
+body { font-family: var(--font-ui); background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+button { cursor: pointer; font-family: inherit; }
+a { text-decoration: none; color: inherit; }
+.app { display: flex; flex-direction: column; min-height: 100vh; }
+
+/* TOPBAR */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px; height: 52px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100; gap: 12px;
+}
+.topbar-left  { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1rem; letter-spacing: -0.02em; }
+.logo-icon { width: 28px; height: 28px; background: linear-gradient(135deg, var(--primary), #8b5cf6); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.logo-version { font-size: 0.65rem; font-family: var(--font-mono); background: var(--primary-dim); color: var(--primary); padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+.conn-badge { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 600; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--border); transition: all .3s; }
+.conn-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: background .3s; }
+.conn-badge.connected    { border-color: var(--success); color: var(--success); }
+.conn-badge.connected .dot { background: var(--success); box-shadow: 0 0 6px var(--success); animation: pulse 2s infinite; }
+.conn-badge.disconnected { border-color: var(--danger); color: var(--danger); }
+.conn-badge.disconnected .dot { background: var(--danger); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* MAIN */
+.main { flex: 1; padding: 20px; max-width: 1440px; margin: 0 auto; width: 100%; }
+
+/* STATS */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; align-items: center; gap: 14px; transition: border-color .2s, transform .2s; }
+.stat-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+.stat-icon { width: 40px; height: 40px; border-radius: var(--radius); display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+.stat-icon.total    { background: #1a2332; }
+.stat-icon.critical { background: var(--danger-dim); }
+.stat-icon.sources  { background: #0d2137; }
+.stat-icon.queue    { background: var(--surface3); }
+.stat-info { flex: 1; min-width: 0; }
+.stat-value { font-size: 1.8rem; font-weight: 700; line-height: 1; font-family: var(--font-mono); }
+.stat-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
+.stat-card.critical .stat-value { color: var(--danger); }
+.stat-card.sources  .stat-value { color: var(--primary); }
+
+/* CHARTS ROW */
+.charts-row { display: grid; grid-template-columns: 1fr 340px; gap: 12px; margin-bottom: 20px; }
+.chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
+.chart-title { font-size: 0.85rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 16px; }
+.sparkline-wrap { position: relative; height: 140px; }
+#sparklineCanvas { width: 100%; height: 100%; }
+.donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.donut-svg { width: 160px; height: 160px; }
+.donut-legend { display: flex; flex-wrap: wrap; gap: 10px 20px; justify-content: center; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--muted); }
+.legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+/* FILTERS */
+.filters-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.filter-group { display: flex; flex-direction: column; gap: 4px; }
+.filter-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+select, input[type="text"] { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); padding: 7px 10px; font-family: var(--font-ui); font-size: 0.85rem; outline: none; transition: border-color .2s; }
+select:focus, input[type="text"]:focus { border-color: var(--primary); }
+select { cursor: pointer; min-width: 140px; }
+input[type="text"] { min-width: 180px; }
+.filter-actions { display: flex; gap: 8px; margin-left: auto; align-items: flex-end; }
+
+/* BUTTONS */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 0.82rem; font-weight: 600; font-family: var(--font-ui); color: var(--text); background: var(--surface2); transition: all .15s; white-space: nowrap; }
+.btn:hover { background: var(--surface3); border-color: var(--border2); }
+.btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn-primary:hover { opacity: .9; }
+.btn-success { background: var(--success-dim); color: var(--success); border-color: var(--success); }
+.btn-success:hover { background: var(--success); color: #fff; }
+
+/* LOGS TABLE */
+.logs-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.logs-toolbar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tab-group { display: flex; gap: 4px; }
+.tab-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid transparent; font-size: 0.82rem; font-weight: 600; color: var(--muted); background: transparent; font-family: var(--font-ui); transition: all .15s; }
+.tab-btn.active { background: var(--primary-dim); color: var(--primary); border-color: var(--primary); }
+.tab-btn:hover:not(.active) { color: var(--text); background: var(--surface2); }
+.live-indicator { display: flex; align-items: center; gap: 5px; font-size: 0.75rem; font-weight: 600; color: var(--success); }
+.live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 1.5s infinite; }
+.toolbar-right { margin-left: auto; display: flex; gap: 8px; }
+.table-wrap { overflow-x: auto; max-height: 460px; overflow-y: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead th { position: sticky; top: 0; background: var(--surface2); padding: 10px 14px; text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr:last-child { border-bottom: none; }
+td { padding: 10px 14px; font-size: 0.82rem; vertical-align: middle; }
+.td-time    { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.td-source  { font-family: var(--font-mono); font-size: 0.78rem; color: var(--primary); white-space: nowrap; }
+.td-message { font-family: var(--font-mono); font-size: 0.78rem; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-actions { white-space: nowrap; }
+
+/* SEVERITY BADGES */
+.sev-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-family: var(--font-mono); }
+.sev-info     { background: #0d2137; color: #58a6ff; }
+.sev-warning  { background: var(--warning-dim); color: var(--warning); }
+.sev-critical { background: var(--danger-dim);  color: var(--danger); }
+.sev-unknown  { background: var(--surface3);    color: var(--muted); }
+
+/* BOUTON ANALYSE */
+.analyse-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 5px;
+  border: 1px solid var(--primary); background: var(--primary-dim);
+  color: var(--primary); font-size: 0.72rem; font-weight: 700;
+  font-family: var(--font-mono); cursor: pointer;
+  transition: all .15s; text-transform: uppercase; letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.analyse-btn:hover:not(:disabled) { background: var(--primary); color: #fff; }
+.analyse-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.analyse-btn.loading  { border-color: var(--warning); background: var(--warning-dim); color: var(--warning); }
+.analyse-btn.done-info     { border-color: var(--success); background: var(--success-dim); color: var(--success); cursor: pointer; }
+.analyse-btn.done-warning  { border-color: var(--warning); background: var(--warning-dim); color: var(--warning); cursor: pointer; }
+.analyse-btn.done-critical { border-color: var(--danger);  background: var(--danger-dim);  color: var(--danger);  cursor: pointer; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { display: inline-block; width: 10px; height: 10px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; flex-shrink: 0; }
+
+.action-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; transition: all .15s; cursor: pointer; }
+.action-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-dim); }
+
+.empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+.empty-icon  { font-size: 2.5rem; margin-bottom: 12px; opacity: .4; }
+.empty-text  { font-size: 0.9rem; }
+
+/* MODAL */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 20px; opacity: 0; pointer-events: none; transition: opacity .2s; }
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal { background: var(--surface); border: 1px solid var(--border2); border-radius: var(--radius-lg); padding: 24px; width: 100%; max-width: 660px; max-height: 90vh; overflow-y: auto; box-shadow: var(--shadow); transform: translateY(8px); transition: transform .2s; }
+.modal-overlay.open .modal { transform: translateY(0); }
+.modal-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 20px; gap: 12px; }
+.modal-title    { font-size: 1rem; font-weight: 700; }
+.modal-subtitle { font-size: 0.75rem; color: var(--muted); font-family: var(--font-mono); margin-top: 2px; }
+.modal-close { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; font-size: 16px; }
+.modal-close:hover { color: var(--text); border-color: var(--border2); }
+.modal-field { margin-bottom: 14px; }
+.modal-field-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; margin-bottom: 5px; }
+.modal-field-value { font-size: 0.85rem; line-height: 1.6; }
+.modal-message { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; font-family: var(--font-mono); font-size: 0.78rem; word-break: break-all; line-height: 1.6; }
+.modal-ai-block { border-radius: var(--radius); padding: 12px 14px; margin-top: 8px; border-left: 3px solid; }
+.modal-ai-block.info-ok     { background: var(--success-dim); border-color: var(--success); }
+.modal-ai-block.warning-pb  { background: #2a1500; border-color: var(--warning); }
+.modal-ai-block.critical-pb { background: var(--danger-dim); border-color: var(--danger); }
+.modal-ai-block.resolution  { background: var(--success-dim); border-color: var(--success); }
+.modal-ai-label { font-size: 0.7rem; text-transform: uppercase; font-weight: 700; letter-spacing: 0.07em; margin-bottom: 6px; }
+.modal-ai-block.info-ok     .modal-ai-label { color: var(--success); }
+.modal-ai-block.warning-pb  .modal-ai-label { color: var(--warning); }
+.modal-ai-block.critical-pb .modal-ai-label { color: var(--danger); }
+.modal-ai-block.resolution  .modal-ai-label { color: var(--success); }
+.ai-loading { display: flex; align-items: center; gap: 10px; padding: 16px; background: var(--surface2); border-radius: var(--radius); border: 1px solid var(--border); color: var(--muted); font-size: 0.82rem; }
+.model-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.04em; margin-left: 8px; }
+.model-tag.info     { background: #0d2137; color: var(--primary); }
+.model-tag.warning  { background: var(--warning-dim); color: var(--warning); }
+.model-tag.critical { background: var(--danger-dim);  color: var(--danger); }
+.model-tag.unknown  { background: var(--surface3);    color: var(--muted); }
+
+/* RESPONSIVE */
+@media (max-width: 1100px) { .stats-grid { grid-template-columns: repeat(3, 1fr); } .charts-row { grid-template-columns: 1fr; } }
+@media (max-width: 768px)  { .main { padding: 12px; } .stats-grid { grid-template-columns: repeat(2, 1fr); } .logo-version { display: none; } select, input[type="text"] { min-width: 110px; } .filter-actions { margin-left: 0; width: 100%; justify-content: flex-end; } .td-message { max-width: 160px; } thead th:nth-child(4), td:nth-child(4) { display: none; } }
+@media (max-width: 480px)  { .stat-value { font-size: 1.4rem; } .charts-row { display: none; } .tab-btn { padding: 5px 10px; font-size: 0.75rem; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="logo">
+        <div class="logo-icon">⚙</div>
+        Syslog Collector
+        <span class="logo-version">v2.0</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a href="/analysis" class="btn">📊 Analyse IA</a>
+      <div class="conn-badge disconnected" id="connBadge">
+        <span class="dot"></span>
+        <span id="connText">Connexion...</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon total">📋</div>
+        <div class="stat-info"><div class="stat-value" id="statTotal">—</div><div class="stat-label">Total Logs</div></div>
+      </div>
+      <div class="stat-card critical">
+        <div class="stat-icon critical">⚠</div>
+        <div class="stat-info"><div class="stat-value" id="statCritical">—</div><div class="stat-label">Critical</div></div>
+      </div>
+      <div class="stat-card sources">
+        <div class="stat-icon sources">🌐</div>
+        <div class="stat-info"><div class="stat-value" id="statSources">—</div><div class="stat-label">Sources</div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon queue">📦</div>
+        <div class="stat-info"><div class="stat-value" id="statQueue">—</div><div class="stat-label">Queue</div></div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-title">Log Volume Over Time</div>
+        <div class="sparkline-wrap"><canvas id="sparklineCanvas"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Severity Distribution</div>
+        <div class="donut-wrap">
+          <svg class="donut-svg" viewBox="0 0 160 160">
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#21262d" stroke-width="24"/>
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#3fb950" stroke-width="24" stroke-dasharray="377" stroke-dashoffset="0"   stroke-linecap="butt" transform="rotate(-90 80 80)" id="donutInfo"/>
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#d29922" stroke-width="24" stroke-dasharray="377" stroke-dashoffset="377" stroke-linecap="butt" transform="rotate(-90 80 80)" id="donutWarning"/>
+            <circle cx="80" cy="80" r="60" fill="none" stroke="#f85149" stroke-width="24" stroke-dasharray="377" stroke-dashoffset="377" stroke-linecap="butt" transform="rotate(-90 80 80)" id="donutCritical"/>
+            <text x="80" y="76" text-anchor="middle" fill="#e6edf3" font-size="22" font-weight="700" font-family="JetBrains Mono,monospace" id="donutTotal">—</text>
+            <text x="80" y="94" text-anchor="middle" fill="#7d8590" font-size="10" font-family="Outfit,sans-serif">TOTAL</text>
+          </svg>
+          <div class="donut-legend">
+            <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Info</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#d29922"></div>Warning</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Critical</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters-bar">
+      <div class="filter-group">
+        <div class="filter-label">Time Range</div>
+        <select id="fTime">
+          <option value="1">Last Hour</option>
+          <option value="24" selected>Last 24 Hours</option>
+          <option value="168">Last Week</option>
+          <option value="720">Last Month</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Severity</div>
+        <select id="fSeverity">
+          <option value="All">All</option>
+          <option value="info">Info</option>
+          <option value="warning">Warning</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Source</div>
+        <input type="text" id="fSource" placeholder="Filter by source...">
+      </div>
+      <div class="filter-group">
+        <div class="filter-label">Search</div>
+        <input type="text" id="fSearch" placeholder="Search logs...">
+      </div>
+      <div class="filter-actions">
+        <button class="btn btn-primary" onclick="applyFilters()">Apply</button>
+        <button class="btn" onclick="resetFilters()">Reset</button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="logs-card">
+      <div class="logs-toolbar">
+        <div class="tab-group">
+          <button class="tab-btn active" id="tabLive" onclick="switchTab('live')">
+            <span class="live-indicator"><span class="live-dot"></span>Live Stream</span>
+          </button>
+          <button class="tab-btn" id="tabHist" onclick="switchTab('historical')">Historical</button>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn btn-success" onclick="generateTestLog()">Generate Test Log</button>
+          <button class="btn" onclick="exportCSV()">Export CSV</button>
+          <button class="btn" onclick="refresh()">Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th><th>Source</th><th>Severity</th><th>Type</th>
+              <th>Message</th><th>Analysis</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="logsBody">
+            <tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📡</div><div class="empty-text">Waiting for logs...</div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title"   id="modalTitle">Log Detail</div>
+        <div class="modal-subtitle" id="modalSubtitle"></div>
+      </div>
+      <button class="modal-close" onclick="closeModalDirect()">✕</button>
+    </div>
+    <div id="modalBody"></div>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ── Config ─────────────────────────────────────────────────────────────────────
+const MODEL_BY_SEV = { info:'llama3:8b', warning:'llama3:70b', critical:'deepseek', unknown:'llama3:8b' };
+
+// ── State ──────────────────────────────────────────────────────────────────────
+let currentTab = 'live';
+let liveLogs   = [];
+let histLogs   = [];
+// Cache des résultats d'analyse manuelle (id → résultat)
+const analysisCache = {};
+
+// ── Socket.IO ──────────────────────────────────────────────────────────────────
+const socket    = io({ transports: ['websocket', 'polling'], reconnectionAttempts: 10 });
+const connBadge = document.getElementById('connBadge');
+const connText  = document.getElementById('connText');
+
+socket.on('connect',       () => { connBadge.className = 'conn-badge connected';    connText.textContent = 'Connected'; });
+socket.on('disconnect',    () => { connBadge.className = 'conn-badge disconnected'; connText.textContent = 'Disconnected'; });
+socket.on('connect_error', () => { connBadge.className = 'conn-badge disconnected'; connText.textContent = 'Error'; });
+
+socket.on('log_message', (log) => {
+  liveLogs.unshift(log);
+  if (liveLogs.length > 500) liveLogs.pop();
+  if (currentTab === 'live') renderTable(liveLogs);
+  fetchStats();
+});
+
+socket.on('log_updated', (log) => {
+  const i = liveLogs.findIndex(l => l._id === log._id);
+  if (i !== -1) liveLogs[i] = log;
+  const j = histLogs.findIndex(l => l._id === log._id);
+  if (j !== -1) histLogs[j] = log;
+  // Mettre à jour le bouton dans la table si visible
+  updateRowAnalysisBtn(log);
+  if (currentTab === 'live') renderTable(liveLogs);
+  else renderTable(histLogs);
+  fetchStats();
+});
+
+// ── Utils ──────────────────────────────────────────────────────────────────────
+function fmtTime(ts) {
+  return new Date(ts).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function sevBadge(log) {
+  const c = log.classification;
+  if (!c) return `<span class="sev-badge sev-unknown">UNKNOWN</span>`;
+  return `<span class="sev-badge sev-${c}">${c.toUpperCase()}</span>`;
+}
+function typeCell(log) {
+  const m = (log.message || '').toLowerCase();
+  if (m.includes('ssh') || m.includes('auth') || m.includes('login'))               return 'auth';
+  if (m.includes('openvpn') || m.includes('ike') || m.includes('vpn') || m.includes('enc')) return 'vpn';
+  if (m.includes('interface') || m.includes('bgp') || m.includes('ospf'))           return 'network';
+  if (m.includes('sql') || m.includes('injection') || m.includes('blocked') || m.includes('firewall')) return 'security';
+  if (m.includes('cpu') || m.includes('disk') || m.includes('memory'))              return 'system';
+  return 'syslog';
+}
+
+// ── Cellule bouton Analyse ─────────────────────────────────────────────────────
+function analysisCell(log) {
+  const cached = analysisCache[log._id];
+  if (cached) {
+    const cls = cached.classification || 'info';
+    return `<button class="analyse-btn done-${cls}" onclick="openCachedModal('${log._id}')">✓ ${cls.toUpperCase()}</button>`;
+  }
+  return `<button class="analyse-btn" id="abtn-${log._id}" onclick="triggerAnalysis(event,'${log._id}')">🤖 Analyse</button>`;
+}
+
+// Mise à jour ciblée du bouton sans re-render toute la table
+function updateRowAnalysisBtn(log) {
+  const btn = document.getElementById(`abtn-${log._id}`);
+  if (!btn) return;
+  const cached = analysisCache[log._id];
+  if (cached) {
+    const cls = cached.classification || 'info';
+    btn.className = `analyse-btn done-${cls}`;
+    btn.textContent = `✓ ${cls.toUpperCase()}`;
+    btn.onclick = () => openCachedModal(log._id);
+    btn.disabled = false;
+  }
+}
+
+// ── Render table ───────────────────────────────────────────────────────────────
+function renderTable(logs) {
+  const tbody = document.getElementById('logsBody');
+  if (!logs.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">No logs found</div></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = logs.map(log => `
+    <tr data-id="${log._id}">
+      <td class="td-time">${fmtTime(log.timestamp)}</td>
+      <td class="td-source">${escHtml(log.source || '—')}</td>
+      <td>${sevBadge(log)}</td>
+      <td><span style="color:var(--muted);font-size:.75rem;font-family:var(--font-mono)">${typeCell(log)}</span></td>
+      <td class="td-message" title="${escHtml(log.message||'')}">${escHtml(log.message || '')}</td>
+      <td>${analysisCell(log)}</td>
+      <td class="td-actions"><button class="action-btn" onclick="openDetailModal('${log._id}')" title="Détail">👁</button></td>
+    </tr>`).join('');
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tabLive').classList.toggle('active', tab === 'live');
+  document.getElementById('tabHist').classList.toggle('active', tab === 'historical');
+  if (tab === 'live') renderTable(liveLogs);
+  else fetchHistorical();
+}
+
+// ── Fetch API ──────────────────────────────────────────────────────────────────
+async function fetchStats() {
+  try {
+    const s = await (await fetch('/api/stats')).json();
+    document.getElementById('statTotal').textContent    = s.total    ?? '—';
+    document.getElementById('statCritical').textContent = s.critical ?? '—';
+    document.getElementById('statSources').textContent  = s.sources  ?? '—';
+    document.getElementById('statQueue').textContent    = s.pending  ?? '—';
+    updateDonut(s);
+  } catch(e) {}
+}
+
+async function fetchVolume() {
+  try {
+    const data = await (await fetch('/api/stats/volume')).json();
+    drawSparkline(data);
+  } catch(e) {}
+}
+
+async function fetchHistorical() {
+  const params = new URLSearchParams({
+    hours:    document.getElementById('fTime').value,
+    severity: document.getElementById('fSeverity').value,
+    source:   document.getElementById('fSource').value,
+    search:   document.getElementById('fSearch').value,
+    limit:    200
+  });
+  try {
+    histLogs = await (await fetch(`/api/logs?${params}`)).json();
+    renderTable(histLogs);
+  } catch(e) {}
+}
+
+async function generateTestLog() { await fetch('/api/test-log', { method: 'POST' }); }
+function exportCSV() { window.location.href = `/api/logs/export?hours=${document.getElementById('fTime').value}`; }
+function applyFilters()  { if (currentTab === 'historical') fetchHistorical(); }
+function resetFilters()  { document.getElementById('fTime').value='24'; document.getElementById('fSeverity').value='All'; document.getElementById('fSource').value=''; document.getElementById('fSearch').value=''; if (currentTab === 'historical') fetchHistorical(); }
+function refresh()       { fetchStats(); fetchVolume(); if (currentTab === 'historical') fetchHistorical(); }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ANALYSE MANUELLE — appel au backend POST /api/analyse-log
+// ══════════════════════════════════════════════════════════════════════════════
+function findLog(id) { return liveLogs.find(l => l._id === id) || histLogs.find(l => l._id === id); }
+
+async function triggerAnalysis(event, logId) {
+  event.stopPropagation();
+  const log = findLog(logId);
+  if (!log) return;
+
+  const btn = document.getElementById(`abtn-${logId}`);
+  if (btn) { btn.disabled = true; btn.className = 'analyse-btn loading'; btn.innerHTML = `<span class="spinner"></span> Analyse...`; }
+
+  // Modale en état loading
+  openLoadingModal(log);
+
+  try {
+    const resp = await fetch('/api/analyse-log', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ logId })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || `HTTP ${resp.status}`);
+    }
+
+    const result = await resp.json();
+    // Mettre en cache
+    analysisCache[logId] = result;
+
+    // Mettre à jour le bouton
+    if (btn) {
+      btn.disabled  = false;
+      btn.className = `analyse-btn done-${result.classification}`;
+      btn.textContent = `✓ ${result.classification.toUpperCase()}`;
+      btn.onclick   = () => openCachedModal(logId);
+    }
+
+    // Mettre à jour la modale si ouverte pour ce log
+    if (currentModalLogId === logId) renderAnalysisResult(log, result);
+
+  } catch(err) {
+    if (btn) { btn.disabled=false; btn.className='analyse-btn'; btn.innerHTML='🤖 Analyse'; btn.onclick=(e)=>triggerAnalysis(e,logId); }
+    if (currentModalLogId === logId) renderAnalysisError(err.message);
+  }
+}
+
+// ── MODAL ──────────────────────────────────────────────────────────────────────
+let currentModalLogId = null;
+
+function openLoadingModal(log) {
+  currentModalLogId = log._id;
+  const sev   = log.classification || 'unknown';
+  const model = MODEL_BY_SEV[sev]  || 'llama3:8b';
+  document.getElementById('modalTitle').textContent    = 'Analyse IA en cours...';
+  document.getElementById('modalSubtitle').textContent = `${escHtml(log.source||'—')} · ${fmtTime(log.timestamp)}`;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-field">
+      <div class="modal-field-label">Source</div>
+      <div class="modal-field-value" style="font-family:var(--font-mono);color:var(--primary)">${escHtml(log.source||'—')}</div>
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">Severity</div>
+      <div class="modal-field-value">${sevBadge(log)}<span class="model-tag ${sev}">🤖 ${model}</span></div>
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">Message</div>
+      <div class="modal-message">${escHtml(log.message||'')}</div>
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">Résultat IA</div>
+      <div class="ai-loading"><span class="spinner" style="width:14px;height:14px"></span> Requête vers <strong>${model}</strong>...</div>
+    </div>`;
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function renderAnalysisResult(log, result) {
+  const sev   = result.classification || log.classification || 'info';
+  const model = result.model || MODEL_BY_SEV[sev] || 'llama3:8b';
+  document.getElementById('modalTitle').textContent = 'Résultat de l\'analyse IA';
+
+  let aiHtml = '';
+  if (sev === 'info') {
+    aiHtml = `<div class="modal-ai-block info-ok">
+      <div class="modal-ai-label">✅ Résumé</div>
+      <div>${escHtml(result.description || 'Événement normal — aucune action requise.')}</div>
+    </div>`;
+  } else if (sev === 'warning') {
+    aiHtml = `
+    <div class="modal-ai-block warning-pb">
+      <div class="modal-ai-label">⚠️ Problème détecté</div>
+      <div>${escHtml(result.description || 'Anomalie détectée.')}</div>
+    </div>
+    <div class="modal-ai-block resolution">
+      <div class="modal-ai-label">✅ Recommandation</div>
+      <div>${escHtml(result.resolution || 'Surveiller ce système.')}</div>
+    </div>`;
+  } else {
+    aiHtml = `
+    <div class="modal-ai-block critical-pb">
+      <div class="modal-ai-label">🔴 Analyse approfondie (deepseek)</div>
+      <div>${escHtml(result.description || 'Incident critique.')}</div>
+    </div>
+    <div class="modal-ai-block resolution">
+      <div class="modal-ai-label">🛠️ Remédiation</div>
+      <div>${escHtml(result.resolution || 'Intervention immédiate requise.')}</div>
+    </div>`;
+  }
+
+  document.getElementById('modalBody').innerHTML = `
+    <div class="modal-field">
+      <div class="modal-field-label">Source</div>
+      <div class="modal-field-value" style="font-family:var(--font-mono);color:var(--primary)">${escHtml(log.source||'—')}</div>
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">Severity</div>
+      <div class="modal-field-value"><span class="sev-badge sev-${sev}">${sev.toUpperCase()}</span><span class="model-tag ${sev}">🤖 ${model}</span></div>
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">Message</div>
+      <div class="modal-message">${escHtml(log.message||'')}</div>
+    </div>
+    <div class="modal-field">
+      <div class="modal-field-label">Résultat IA</div>
+      ${aiHtml}
+    </div>`;
+}
+
+function renderAnalysisError(errMsg) {
+  document.getElementById('modalTitle').textContent = 'Erreur d\'analyse';
+  const fields = document.getElementById('modalBody').querySelectorAll('.modal-field');
+  if (fields.length) fields[fields.length-1].innerHTML = `
+    <div class="modal-field-label">Résultat IA</div>
+    <div class="modal-ai-block critical-pb">
+      <div class="modal-ai-label" style="color:var(--danger)">❌ Erreur</div>
+      <div>${escHtml(errMsg)}</div>
+    </div>`;
+}
+
+function openCachedModal(logId) {
+  const log    = findLog(logId);
+  const result = analysisCache[logId];
+  if (!log) return;
+  currentModalLogId = logId;
+  document.getElementById('modalSubtitle').textContent = `${escHtml(log.source||'—')} · ${fmtTime(log.timestamp)}`;
+  if (result) renderAnalysisResult(log, result);
+  else { openLoadingModal(log); triggerAnalysis({ stopPropagation:()=>{} }, logId); }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function openDetailModal(logId) {
+  const log = findLog(logId);
+  if (!log) return;
+  currentModalLogId = logId;
+  const cached = analysisCache[logId];
+  document.getElementById('modalSubtitle').textContent = `${escHtml(log.source||'—')} · ${fmtTime(log.timestamp)}`;
+  if (cached) { renderAnalysisResult(log, cached); }
+  else {
+    document.getElementById('modalTitle').textContent = 'Log Detail';
+    document.getElementById('modalBody').innerHTML = `
+      <div class="modal-field"><div class="modal-field-label">Timestamp</div><div class="modal-field-value">${new Date(log.timestamp).toLocaleString('fr-FR')}</div></div>
+      <div class="modal-field"><div class="modal-field-label">Source</div><div class="modal-field-value" style="font-family:var(--font-mono);color:var(--primary)">${escHtml(log.source||'—')}</div></div>
+      <div class="modal-field"><div class="modal-field-label">Severity</div><div class="modal-field-value">${sevBadge(log)}</div></div>
+      <div class="modal-field"><div class="modal-field-label">Message</div><div class="modal-message">${escHtml(log.message||'')}</div></div>
+      <div class="modal-field"><div class="modal-field-label">Analyse IA</div>
+        <div style="color:var(--muted);font-size:.82rem;font-style:italic;padding:10px 0">Cliquez sur <strong>🤖 Analyse</strong> dans la table pour lancer une analyse manuelle.</div>
+      </div>`;
+  }
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function closeModal(e)    { if (e.target === document.getElementById('modalOverlay')) closeModalDirect(); }
+function closeModalDirect() { document.getElementById('modalOverlay').classList.remove('open'); currentModalLogId = null; }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModalDirect(); });
+
+// ── Donut ──────────────────────────────────────────────────────────────────────
+function updateDonut(s) {
+  const total = s.total || 1;
+  const circ  = 2 * Math.PI * 60;
+  const info  = (s.info||0)/total*circ, warn=(s.warning||0)/total*circ, crit=(s.critical||0)/total*circ;
+  document.getElementById('donutTotal').textContent = s.total || 0;
+  document.getElementById('donutInfo').setAttribute('stroke-dasharray',    `${info} ${circ-info}`);
+  document.getElementById('donutInfo').setAttribute('stroke-dashoffset',   '0');
+  document.getElementById('donutWarning').setAttribute('stroke-dasharray', `${warn} ${circ-warn}`);
+  document.getElementById('donutWarning').setAttribute('stroke-dashoffset',`${circ-info}`);
+  document.getElementById('donutCritical').setAttribute('stroke-dasharray',`${crit} ${circ-crit}`);
+  document.getElementById('donutCritical').setAttribute('stroke-dashoffset',`${circ-info-warn}`);
+}
+
+// ── Sparkline ──────────────────────────────────────────────────────────────────
+function drawSparkline(volumeData) {
+  const canvas = document.getElementById('sparklineCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W   = canvas.parentElement.offsetWidth;
+  const H   = canvas.parentElement.offsetHeight;
+  canvas.width  = W * dpr; canvas.height = H * dpr;
+  canvas.style.width  = W + 'px'; canvas.style.height = H + 'px';
+  ctx.scale(dpr, dpr);
+  if (!volumeData || !volumeData.length) { ctx.fillStyle='#7d8590'; ctx.font='12px Outfit'; ctx.textAlign='center'; ctx.fillText('No data', W/2, H/2); return; }
+  const counts = volumeData.map(d => d.count);
+  const max    = Math.max(...counts, 1);
+  const pad    = { t:10, r:10, b:30, l:40 };
+  const cW     = W-pad.l-pad.r, cH = H-pad.t-pad.b;
+  const step   = cW / Math.max(counts.length-1, 1);
+  ctx.strokeStyle='#30363d'; ctx.lineWidth=1;
+  for (let i=0;i<=4;i++) { const y=pad.t+(cH/4)*i; ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y); ctx.stroke(); }
+  ctx.fillStyle='#7d8590'; ctx.font='10px JetBrains Mono'; ctx.textAlign='right';
+  for (let i=0;i<=4;i++) { ctx.fillText(Math.round(max-(max/4)*i), pad.l-6, pad.t+(cH/4)*i+4); }
+  const grad = ctx.createLinearGradient(0,pad.t,0,pad.t+cH);
+  grad.addColorStop(0,'rgba(88,166,255,0.3)'); grad.addColorStop(1,'rgba(88,166,255,0)');
+  ctx.beginPath();
+  counts.forEach((c,i) => { const x=pad.l+i*step, y=pad.t+cH-(c/max)*cH; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.lineTo(pad.l+(counts.length-1)*step,pad.t+cH); ctx.lineTo(pad.l,pad.t+cH);
+  ctx.closePath(); ctx.fillStyle=grad; ctx.fill();
+  ctx.beginPath(); ctx.strokeStyle='#58a6ff'; ctx.lineWidth=2;
+  counts.forEach((c,i) => { const x=pad.l+i*step, y=pad.t+cH-(c/max)*cH; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.stroke();
+  counts.forEach((c,i) => { ctx.beginPath(); ctx.arc(pad.l+i*step,pad.t+cH-(c/max)*cH,3,0,Math.PI*2); ctx.fillStyle='#58a6ff'; ctx.fill(); });
+  ctx.fillStyle='#7d8590'; ctx.font='9px JetBrains Mono'; ctx.textAlign='center';
+  const step2 = Math.max(1,Math.floor(counts.length/6));
+  volumeData.forEach((d,i) => { if(i%step2!==0) return; ctx.fillText(new Date(d.time).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}),pad.l+i*step,H-8); });
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+fetchStats();
+fetchVolume();
+fetchHistorical().then(() => {
+  histLogs.forEach(l => { if (!liveLogs.find(x => x._id === l._id)) liveLogs.unshift(l); });
+  renderTable(liveLogs);
+});
+setInterval(fetchStats,  30000);
+setInterval(fetchVolume, 60000);
+setInterval(() => { if (currentTab === 'historical') fetchHistorical(); }, 60000);
+window.addEventListener('resize', () => fetchVolume());
+</script>
+</body>
+</html>
