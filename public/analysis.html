@@ -161,6 +161,47 @@ input[type="text"] { min-width: 280px; }
 .log-summary-box.critical .log-summary-label { color: var(--danger); }
 .log-summary-box.pending  .log-summary-label { color: var(--muted); }
 
+/* ─── Bouton Vocal ───────────────────────────────────────────────────────────── */
+.speak-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 10px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-ui);
+}
+
+.speak-btn:hover {
+    background: var(--surface3);
+    color: var(--primary);
+    border-color: var(--primary);
+    transform: scale(1.02);
+}
+
+.speak-btn.speaking {
+    background: var(--primary-dim);
+    color: var(--primary);
+    border-color: var(--primary);
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.speak-btn-icon {
+    font-size: 0.9rem;
+}
+
 /* Skeleton */
 .skeleton-entry { border-bottom: 1px solid var(--border); padding: 16px 20px; }
 .skeleton-line  { height: 11px; border-radius: 4px; background: linear-gradient(90deg,var(--surface2) 25%,var(--surface3) 50%,var(--surface2) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; margin-bottom: 8px; }
@@ -173,6 +214,108 @@ input[type="text"] { min-width: 280px; }
 /* RESPONSIVE */
 @media (max-width:1100px) { .stats-grid{grid-template-columns:repeat(2,1fr);} .charts-row{grid-template-columns:1fr;} .log-summary-box{max-width:100%;flex:none;} .log-content-row{flex-direction:column;} }
 @media (max-width:768px)  { .main{padding:12px;} .stats-grid{grid-template-columns:repeat(2,1fr);} input[type="text"]{min-width:140px;} .filter-actions{margin-left:0;width:100%;justify-content:flex-end;} }
+
+/* ─── Modal Détails ─────────────────────────────────────────────────────────── */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.active {
+    display: flex;
+}
+
+.modal-content {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    max-width: 650px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow);
+    animation: modalFadeIn 0.2s ease;
+}
+
+@keyframes modalFadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--muted);
+    padding: 0 8px;
+}
+
+.modal-body {
+    padding: 20px;
+}
+
+.modal-section {
+    margin-bottom: 20px;
+}
+
+.modal-section h4 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+}
+
+.modal-section p {
+    line-height: 1.6;
+    font-size: 0.9rem;
+}
+
+.modal-original {
+    background: var(--surface2);
+    padding: 12px;
+    border-radius: var(--radius);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    overflow-x: auto;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.btn-speak {
+    background: var(--primary-dim);
+    border-color: var(--primary);
+}
 </style>
 </head>
 <body>
@@ -240,7 +383,6 @@ input[type="text"] { min-width: 280px; }
 
     <!-- Charts -->
     <div class="charts-row">
-      <!-- Donut -->
       <div class="chart-card">
         <div class="chart-title">Severity Distribution</div>
         <div class="donut-wrap">
@@ -260,11 +402,9 @@ input[type="text"] { min-width: 280px; }
         </div>
       </div>
 
-      <!-- Analysis Depth -->
       <div class="chart-card">
         <div class="chart-title">Analysis Depth</div>
         <div class="depth-wrap">
-          <!-- INFO -->
           <div class="depth-row">
             <div class="depth-row-header">
               <div class="depth-row-meta">
@@ -278,7 +418,6 @@ input[type="text"] { min-width: 280px; }
             </div>
             <div class="depth-bar-track"><div class="depth-bar-fill info" id="depthBarInfo" style="width:0%"></div></div>
           </div>
-          <!-- WARNING -->
           <div class="depth-row">
             <div class="depth-row-header">
               <div class="depth-row-meta">
@@ -292,7 +431,6 @@ input[type="text"] { min-width: 280px; }
             </div>
             <div class="depth-bar-track"><div class="depth-bar-fill warning" id="depthBarWarning" style="width:0%"></div></div>
           </div>
-          <!-- CRITICAL -->
           <div class="depth-row">
             <div class="depth-row-header">
               <div class="depth-row-meta">
@@ -306,7 +444,6 @@ input[type="text"] { min-width: 280px; }
             </div>
             <div class="depth-bar-track"><div class="depth-bar-fill critical" id="depthBarCritical" style="width:0%"></div></div>
           </div>
-          <!-- Légende -->
           <div class="depth-legend">
             <div class="depth-legend-item"><span class="model-pill info" style="font-size:.6rem">🤖 llama3:8b</span> Quick — événements normaux</div>
             <div class="depth-legend-item"><span class="model-pill warning" style="font-size:.6rem">🤖 llama3:70b</span> Standard — anomalies</div>
@@ -334,6 +471,40 @@ input[type="text"] { min-width: 280px; }
   </main>
 </div>
 
+<!-- Modal Détails -->
+<div id="detailModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>📋 Détails du log</h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="modal-section">
+                <h4>Message original</h4>
+                <div class="modal-original" id="modalOriginal"></div>
+            </div>
+            <div class="modal-section" id="modalSeverity">
+                <h4>Classification</h4>
+                <p id="modalClassif"></p>
+            </div>
+            <div class="modal-section" id="modalDescSection">
+                <h4>🔍 Description</h4>
+                <p id="modalDescription"></p>
+            </div>
+            <div class="modal-section" id="modalResSection">
+                <h4>✅ Résolution</h4>
+                <p id="modalResolution"></p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-primary btn-speak" id="modalSpeakBtn">
+                    <span class="speak-btn-icon">🎤</span> Lire à voix haute
+                </button>
+                <button class="btn" onclick="closeModal()">Fermer</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="/socket.io/socket.io.js"></script>
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────────
@@ -342,8 +513,6 @@ const DEPTH_LABEL   = { info:'QUICK', warning:'STANDARD', critical:'DEEP' };
 const DEPTH_CSS     = { info:'depth-quick', warning:'depth-standard', critical:'depth-deep' };
 
 // ── State ──────────────────────────────────────────────────────────────────────
-// allLogs = tous les logs chargés depuis l'API pour la période courante
-// Le filtrage sévérité + search se fait entièrement côté client → instantané, pas de flash
 let allLogs     = [];
 let currentHours = '24';
 
@@ -364,6 +533,127 @@ function applyTheme() {
 }
 applyTheme();
 
+// ── Synthèse Vocale (Speech Synthesis) ────────────────────────────────────────
+let currentUtterance = null;
+
+function stopSpeaking() {
+    if (currentUtterance) {
+        window.speechSynthesis.cancel();
+        currentUtterance = null;
+    }
+    document.querySelectorAll('.speak-btn').forEach(btn => {
+        btn.classList.remove('speaking');
+        btn.innerHTML = '<span class="speak-btn-icon">🎤</span> Vocal';
+    });
+}
+
+function speakLogDetails(logId) {
+    const log = allLogs.find(l => l._id === logId);
+    if (!log) return;
+    
+    if (!log.analyzed || !log.classification) {
+        const msg = new SpeechSynthesisUtterance("Ce log n'a pas encore été analysé. Aucun détail disponible.");
+        msg.lang = 'fr-FR';
+        window.speechSynthesis.speak(msg);
+        return;
+    }
+    
+    stopSpeaking();
+    
+    const btn = document.querySelector(`.speak-btn[data-id="${logId}"]`);
+    if (btn) {
+        btn.classList.add('speaking');
+        btn.innerHTML = '<span class="speak-btn-icon">⏹️</span> Arrêter';
+    }
+    
+    let text = "";
+    if (log.classification === 'info') {
+        text = `Log de type information. ${log.description || 'Événement normal détecté, aucune action requise.'}`;
+    } else if (log.classification === 'warning') {
+        text = `Alerte de niveau avertissement. Problème détecté : ${log.description || 'Anomalie non spécifiée'}. Solution recommandée : ${log.resolution || 'Surveiller la situation et analyser les logs.'}`;
+    } else {
+        text = `Alerte critique ! Problème grave détecté. Description : ${log.description || 'Incident critique non spécifié'}. Action immédiate requise : ${log.resolution || 'Contacter l\'administrateur système immédiatement.'}`;
+    }
+    text += ` Message original : ${log.message}`;
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'fr-FR';
+    utterance.rate = 0.9;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    utterance.onend = () => {
+        if (btn) {
+            btn.classList.remove('speaking');
+            btn.innerHTML = '<span class="speak-btn-icon">🎤</span> Vocal';
+        }
+        currentUtterance = null;
+    };
+    
+    utterance.onerror = () => {
+        if (btn) {
+            btn.classList.remove('speaking');
+            btn.innerHTML = '<span class="speak-btn-icon">🎤</span> Vocal';
+        }
+        currentUtterance = null;
+    };
+    
+    currentUtterance = utterance;
+    window.speechSynthesis.speak(utterance);
+}
+
+function toggleSpeak(logId) {
+    const btn = document.querySelector(`.speak-btn[data-id="${logId}"]`);
+    if (currentUtterance && btn && btn.classList.contains('speaking')) {
+        stopSpeaking();
+    } else {
+        speakLogDetails(logId);
+    }
+}
+
+// ─── Modal Détails ────────────────────────────────────────────────────────────
+let currentModalLog = null;
+
+function openModal(logId) {
+    const log = allLogs.find(l => l._id === logId);
+    if (!log) return;
+    
+    currentModalLog = log;
+    
+    document.getElementById('modalOriginal').textContent = log.message || '—';
+    document.getElementById('modalClassif').innerHTML = `<span class="sev-badge sev-${log.classification || 'pending'}">${(log.classification || 'PENDING').toUpperCase()}</span>`;
+    
+    if (!log.analyzed || !log.classification) {
+        document.getElementById('modalDescSection').style.display = 'none';
+        document.getElementById('modalResSection').style.display = 'none';
+    } else {
+        document.getElementById('modalDescSection').style.display = 'block';
+        document.getElementById('modalResSection').style.display = 'block';
+        document.getElementById('modalDescription').textContent = log.description || 'Non disponible';
+        document.getElementById('modalResolution').textContent = log.resolution || 'Non disponible';
+    }
+    
+    document.getElementById('detailModal').classList.add('active');
+}
+
+function closeModal() {
+    document.getElementById('detailModal').classList.remove('active');
+    currentModalLog = null;
+    stopSpeaking();
+}
+
+function speakCurrentModal() {
+    if (!currentModalLog) return;
+    speakLogDetails(currentModalLog._id);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const modalSpeakBtn = document.getElementById('modalSpeakBtn');
+    if (modalSpeakBtn) {
+        modalSpeakBtn.onclick = speakCurrentModal;
+    }
+});
+
 // ── Utils ──────────────────────────────────────────────────────────────────────
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function fmtDateTime(ts) {
@@ -383,11 +673,11 @@ function modelPill(c) {
 }
 function catBadge(msg) {
   const m = (msg||'').toLowerCase();
-  if (m.includes('ssh')||m.includes('auth')||m.includes('login'))               return 'auth';
+  if (m.includes('ssh')||m.includes('auth')||m.includes('login')) return 'auth';
   if (m.includes('openvpn')||m.includes('ike')||m.includes('vpn')||m.includes('enc')) return 'vpn';
-  if (m.includes('interface')||m.includes('bgp')||m.includes('ospf'))           return 'network';
+  if (m.includes('interface')||m.includes('bgp')||m.includes('ospf')) return 'network';
   if (m.includes('sql')||m.includes('injection')||m.includes('blocked')||m.includes('firewall')) return 'security';
-  if (m.includes('cpu')||m.includes('disk')||m.includes('memory'))              return 'system';
+  if (m.includes('cpu')||m.includes('disk')||m.includes('memory')) return 'system';
   return 'syslog';
 }
 
@@ -419,6 +709,8 @@ function renderEntry(log) {
         ${c?depthBadge(c):''}
         ${c?modelPill(c):''}
         <span class="cat-badge">${catBadge(log.message)}</span>
+        <button class="speak-btn" data-id="${log._id}" onclick="event.stopPropagation(); toggleSpeak('${log._id}')"><span class="speak-btn-icon">🎤</span> Vocal</button>
+        <button class="speak-btn" onclick="event.stopPropagation(); openModal('${log._id}')"><span class="speak-btn-icon">📋</span> Détails</button>
       </div>
       <div class="log-content-row">
         <div class="log-msg-wrap">
@@ -436,7 +728,10 @@ function renderFiltered() {
   const sevFilter    = document.getElementById('fSeverity').value;
   const searchFilter = document.getElementById('fSearch').value.toLowerCase().trim();
 
+  // Filtrer les logs analysés UNIQUEMENT
   const filtered = allLogs.filter(log => {
+    // Ne montrer que les logs analysés (analyzed = true ET classification non null)
+    if (!log.analyzed || !log.classification) return false;
     if (sevFilter && log.classification !== sevFilter) return false;
     if (searchFilter) {
       const hay = [log.message||'', log.description||'', log.resolution||'', log.source||''].join(' ').toLowerCase();
@@ -449,10 +744,14 @@ function renderFiltered() {
   const count     = document.getElementById('logsCount');
 
   if (!filtered.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Aucun log ne correspond aux filtres.</div></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">Aucun log analysé pour la période sélectionnée.<br>Les logs sont analysés automatiquement toutes les 5 minutes.</div></div>`;
     count.textContent = '';
     return;
   }
+  
+  // Trier du plus récent au plus ancien
+  filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  
   count.textContent = `${filtered.length} log${filtered.length>1?'s':''}`;
   container.innerHTML = filtered.map(renderEntry).join('');
 }
@@ -460,7 +759,7 @@ function renderFiltered() {
 let debTimer = null;
 function debounceFilter() { clearTimeout(debTimer); debTimer = setTimeout(renderFiltered, 220); }
 
-// ── Chargement API (uniquement quand la période change) ────────────────────────
+// ── Chargement API ────────────────────────────────────────────────────────────
 async function loadAnalysis() {
   const container = document.getElementById('logEntries');
   container.innerHTML = `
@@ -471,20 +770,29 @@ async function loadAnalysis() {
   await loadStats();
 
   try {
-    // Charge tous les logs analysés pour la période — pas de filtre sévérité côté serveur
     const params = new URLSearchParams({ hours: currentHours, limit: 500 });
     const res    = await fetch(`/api/analysis?${params}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    allLogs = await res.json();
+    const logs = await res.json();
+    
+    // Ne garder que les logs analysés (par sécurité)
+    allLogs = logs.filter(log => log.analyzed === true && log.classification !== null);
+    
+    console.log(`📊 ${allLogs.length} logs analysés chargés pour les ${currentHours} dernières heures`);
+    
     renderFiltered();
   } catch(err) {
+    console.error('Erreur chargement:', err);
     container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><div class="empty-text" style="color:var(--danger)">Erreur : ${escHtml(err.message)}</div></div>`;
   }
 }
 
 function onTimeChange() {
   const newHours = document.getElementById('fTime').value;
-  if (newHours !== currentHours) { currentHours = newHours; loadAnalysis(); }
+  if (newHours !== currentHours) { 
+    currentHours = newHours; 
+    loadAnalysis(); 
+  }
 }
 
 function resetFilters() {
@@ -505,7 +813,9 @@ async function loadStats() {
     document.getElementById('statDeep').textContent     = s.deep     ?? '0';
     updateDonut(s);
     updateDepthBars(s);
-  } catch(e) {}
+  } catch(e) {
+    console.error('Erreur stats:', e);
+  }
 }
 
 function updateDonut(s) {
@@ -540,25 +850,37 @@ try {
   const socket = io({ transports: ['websocket','polling'] });
 
   socket.on('log_updated', (log) => {
+    console.log('📢 Log mis à jour:', log._id, log.classification);
     loadStats();
+    
+    // Mettre à jour ou ajouter le log
     const idx = allLogs.findIndex(l => l._id === log._id);
     if (idx !== -1) {
       allLogs[idx] = log;
-    } else {
+    } else if (log.analyzed && log.classification) {
       allLogs.unshift(log);
+      // Limiter à 500 logs pour éviter les problèmes de performance
+      if (allLogs.length > 500) allLogs.pop();
     }
-    // Re-render filtré instantané
+    
     renderFiltered();
-    // Flash discret sur l'entrée mise à jour
+    
+    // Animation flash sur l'entrée mise à jour
     const el = document.querySelector(`.log-entry[data-id="${log._id}"]`);
-    if (el) { el.style.transition='background .3s'; el.style.background='rgba(88,166,255,0.1)'; setTimeout(()=>{ el.style.background=''; },1800); }
+    if (el) { 
+      el.style.transition='background .3s'; 
+      el.style.background='rgba(88,166,255,0.15)'; 
+      setTimeout(()=>{ el.style.background=''; }, 1800); 
+    }
   });
-} catch(e) {}
+} catch(e) {
+  console.error('Socket.IO error:', e);
+}
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 loadAnalysis();
-setInterval(loadStats,    30000);
-setInterval(loadAnalysis, 120000);
+setInterval(loadStats, 30000);
+setInterval(loadAnalysis, 60000); // Rafraîchir toutes les minutes
 </script>
 </body>
 </html>
