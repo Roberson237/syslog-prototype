@@ -1,4 +1,4 @@
-# 📊 Syslog Collector with AI Analysis
+je# 📊 Syslog Collector with AI Analysis
 
 Un système de collecte de syslog moderne qui utilise l'intelligence artificielle pour analyser et interpréter les messages de logs réseau en temps réel. Cette application recueille des messages syslog via UDP, les analyse avec LiteLLM (supportant plusieurs modèles comme Llama3, Phi3, Gemma, etc.), les stocke dans MongoDB, et fournit une interface web complète avec visualisation des analyses et synthèse vocale.
 
@@ -17,7 +17,7 @@ Différents modèles selon la sévérité du log :
 |----------|--------|-------|
 | ℹ️ Info | `llama3:8b` | Analyse rapide pour événements normaux |
 | ⚠️ Warning | `llama3:70b` | Analyse standard pour anomalies |
-| 🔴 Critical | `deepseek` | Analyse approfondie pour incidents critiques |
+| 🔴 Critical | `gemma` | Analyse approfondie pour incidents critiques |
 
 ### Stockage
 - **💾 MongoDB** : Stockage persistant avec indexation optimisée
