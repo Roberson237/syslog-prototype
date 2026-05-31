@@ -18,7 +18,7 @@ Différents modèles selon la sévérité du log :
 |----------|--------|-------|
 | ℹ️ Info | `llama3:8b` | Analyse rapide pour événements normaux |
 | ⚠️ Warning | `llama3:70b` | Analyse standard pour anomalies |
-| 🔴 Critical | `deepseek` | Analyse approfondie pour incidents critiques |
+| 🔴 Critical | `gemma` | Analyse approfondie pour incidents critiques |
 
 ### Stockage
 - **💾 MongoDB** : Stockage persistant avec indexation optimisée
