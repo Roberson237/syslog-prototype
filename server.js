@@ -11,9 +11,9 @@ import crypto from 'crypto';
 import { setTimeout } from 'timers/promises';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(__filename);
 
-// ─── Schéma MongoDB (avec hash unique pour dédoublonnage) ──────────────────────
+// ─── Schéma MongoDB ────────────────────────────────────────────────────────────
 const logSchema = new mongoose.Schema({
     timestamp:      { type: Date, default: Date.now },
     source:         String,
@@ -47,26 +47,82 @@ const RETRY_INTERVAL  = 5000;
 const STARTUP_DELAY   = parseInt(process.env.STARTUP_DELAY || '0', 10) * 1000;
 const BATCH_LIMIT     = 20;
 
+// Configuration de la rotation des logs (en jours)
+const LOG_RETENTION = {
+    unanalyzed: 7,
+    info: 30,
+    warning: 90,
+    critical: 365
+};
+
+// ─── MODÈLES CONFIGURABLES VIA .env ────────────────────────────────────────────
+const MODEL_INFO     = process.env.INFO_MODEL     || 'llama3:8b';
+const MODEL_WARNING  = process.env.WARNING_MODEL  || 'phi3:mini';
+const MODEL_CRITICAL = process.env.CRITICAL_MODEL || 'gemma4:26b';
+
+const MODEL_BY_SEV = {
+    info: MODEL_INFO,
+    warning: MODEL_WARNING,
+    critical: MODEL_CRITICAL
+};
+
 console.log(`📡 LiteLLM URL   : ${LITELLM_URL}`);
-console.log(`🤖 LiteLLM Model : ${LITELLM_MODEL}`);
+console.log(`🤖 Modèle par défaut : ${LITELLM_MODEL}`);
+console.log(`📋 Modèle INFO    : ${MODEL_INFO}`);
+console.log(`⚠️ Modèle WARNING : ${MODEL_WARNING}`);
+console.log(`🔴 Modèle CRITICAL: ${MODEL_CRITICAL}`);
 console.log(`🗄️ MongoDB URI   : ${MONGODB_URI}`);
 
-// ─── Fonction pour générer un hash unique (source + message normalisés) ─────────
+// ─── Fonction pour générer un hash unique ──────────────────────────────────────
 function generateUniqueHash(source, message) {
-    const normalizedMessage = message.trim().toLowerCase().replace(/\s+/g, ' ');
+    let normalizedMessage = message.trim().toLowerCase()
+        .replace(/\s+/g, ' ')
+        .replace(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g, 'IP_ADDR')
+        .replace(/[0-9a-f]{8,}/g, 'HEX_ID')
+        .replace(/\d+/g, 'NUM');
+    
     const normalizedSource = source.trim().toLowerCase();
     const content = `${normalizedSource}|${normalizedMessage}`;
     return crypto.createHash('sha256').update(content).digest('hex');
 }
 
-// ─── Connexion MongoDB avec création d'index ───────────────────────────────────
+// ─── Rotation automatique des logs ────────────────────────────────────────────
+async function rotateLogs() {
+    try {
+        const now = new Date();
+        let deletedCount = 0;
+        
+        const unanalyzedCutoff = new Date(now - LOG_RETENTION.unanalyzed * 24 * 3600000);
+        const result1 = await Log.deleteMany({ analyzed: false, timestamp: { $lt: unanalyzedCutoff } });
+        deletedCount += result1.deletedCount;
+        
+        const infoCutoff = new Date(now - LOG_RETENTION.info * 24 * 3600000);
+        const result2 = await Log.deleteMany({ classification: 'info', timestamp: { $lt: infoCutoff } });
+        deletedCount += result2.deletedCount;
+        
+        const warningCutoff = new Date(now - LOG_RETENTION.warning * 24 * 3600000);
+        const result3 = await Log.deleteMany({ classification: 'warning', timestamp: { $lt: warningCutoff } });
+        deletedCount += result3.deletedCount;
+        
+        const criticalCutoff = new Date(now - LOG_RETENTION.critical * 24 * 3600000);
+        const result4 = await Log.deleteMany({ classification: 'critical', timestamp: { $lt: criticalCutoff } });
+        deletedCount += result4.deletedCount;
+        
+        if (deletedCount > 0) {
+            console.log(`🔄 Rotation des logs : ${deletedCount} logs supprimés`);
+        }
+    } catch (err) {
+        console.error('❌ Erreur rotation logs:', err.message);
+    }
+}
+
+// ─── Connexion MongoDB ─────────────────────────────────────────────────────────
 async function connectWithRetry(retries = MAX_RETRIES) {
     try {
         console.log('🔌 Connexion à MongoDB...');
         await mongoose.connect(MONGODB_URI);
         console.log('✅ MongoDB connecté');
         
-        // Créer l'index unique sur uniqueHash (sparse pour éviter les nulls)
         try {
             await Log.collection.createIndex({ uniqueHash: 1 }, { unique: true, sparse: true });
             console.log('✅ Index unique sur uniqueHash créé');
@@ -83,7 +139,7 @@ async function connectWithRetry(retries = MAX_RETRIES) {
     } catch (err) {
         console.error('❌ Erreur MongoDB :', err.message);
         if (retries > 0) {
-            console.log(`🔄 Nouvelle tentative dans ${RETRY_INTERVAL / 1000}s... (${retries} restantes)`);
+            console.log(`🔄 Nouvelle tentative dans ${RETRY_INTERVAL / 1000}s...`);
             await setTimeout(RETRY_INTERVAL);
             await connectWithRetry(retries - 1);
         } else {
@@ -93,7 +149,7 @@ async function connectWithRetry(retries = MAX_RETRIES) {
     }
 }
 
-// ─── Appel LiteLLM générique ───────────────────────────────────────────────────
+// ─── Appel LiteLLM ─────────────────────────────────────────────────────────────
 async function callLiteLLM(prompt, model = null) {
     const headers = { 'Content-Type': 'application/json' };
     if (LITELLM_API_KEY) headers['Authorization'] = `Bearer ${LITELLM_API_KEY}`;
@@ -102,9 +158,9 @@ async function callLiteLLM(prompt, model = null) {
         method: 'POST',
         headers,
         body: JSON.stringify({
-            model:       model || LITELLM_MODEL,
-            messages:    [{ role: 'user', content: prompt }],
-            max_tokens:  3000,
+            model: model || LITELLM_MODEL,
+            messages: [{ role: 'user', content: prompt }],
+            max_tokens: 3000,
             temperature: 0.1
         })
     });
@@ -118,89 +174,195 @@ async function callLiteLLM(prompt, model = null) {
     return data.choices[0].message.content;
 }
 
-// ─── Prompt batch (plusieurs logs) ────────────────────────────────────────────
+// ─── Prompts IA avec fallback pour les résolutions ─────────────────────────────
 function buildBatchPrompt(logs) {
     const lines = logs.map((l, i) => `${i + 1}. [${l.source}] ${l.message}`).join('\n');
-    return `You are a network security and system administration expert.
-Analyze each syslog message below and return ONLY a valid JSON array.
+    return `You are a cybersecurity expert. Analyze each syslog message.
 
-Strict rules:
-- "classification": exactly one of: "info", "warning", "critical"
-  * info     = normal event, no action needed
-  * warning  = anomaly to monitor, action recommended
-  * critical = serious problem, immediate action required
-- "description": short sentence explaining the problem (null if info)
-- "resolution": short sentence on what to do to fix it (null if info)
-- Reply ONLY with the JSON array, no text before or after, no markdown.
+IMPORTANT: For "warning" and "critical" messages, you MUST provide a specific, actionable resolution.
+"info" messages should have null for both description and resolution.
+
+Return ONLY valid JSON array. Example:
+[
+  {"index":1,"classification":"critical","description":"SSH brute force attack detected","resolution":"Block IP 185.220.101.45 using: sudo iptables -A INPUT -s 185.220.101.45 -j DROP"},
+  {"index":2,"classification":"warning","description":"High CPU usage","resolution":"Check processes with 'top' and restart service if needed"},
+  {"index":3,"classification":"info","description":null,"resolution":null}
+]
 
 Logs to analyze:
 ${lines}
 
-Expected format:
-[
-  {"index":1,"classification":"critical","description":"SSH brute force attack","resolution":"Block IP in firewall"},
-  {"index":2,"classification":"info","description":null,"resolution":null}
-]`;
+Return ONLY the JSON array, no other text.`;
+
 }
 
-// ─── Parser réponse IA (batch) ─────────────────────────────────────────────────
-function parseBatchResponse(raw) {
-    let cleaned = raw.replace(/```json|```/g, '').trim();
+function buildManualPrompt(log, sev) {
+    const base = `[${log.source}] ${log.message}`;
     
-    // Extraire le premier tableau JSON
+    if (sev === 'info') {
+        return `Analyze this INFO syslog entry. Reply ONLY with JSON: {"classification":"info","description":"summary","resolution":null}\n\nLog: ${base}`;
+    }
+    if (sev === 'warning') {
+        return `Analyze this WARNING syslog entry. You MUST provide an actionable resolution. Reply ONLY with JSON: {"classification":"warning","description":"what is the issue","resolution":"specific command or action to fix"}\n\nLog: ${base}`;
+    }
+    if (sev === 'critical') {
+        return `Analyze this CRITICAL syslog entry deeply. You MUST provide step-by-step remediation. Reply ONLY with JSON: {"classification":"critical","description":"root cause","resolution":"step-by-step remediation actions"}\n\nLog: ${base}`;
+    }
+    return `Analyze this syslog entry. Reply ONLY with JSON: {"classification":"info|warning|critical","description":"...","resolution":"..."}\n\nLog: ${base}`;
+}
+
+// ─── Génération de résolution par défaut (fallback) ───────────────────────────
+function generateDefaultResolution(message, classification) {
+    const msg = message.toLowerCase();
+    
+    const resolutions = {
+        'ssh': "Bloquer l'IP source: sudo iptables -A INPUT -s IP -j DROP && sudo fail2ban-client status sshd",
+        'brute': "Bloquer l'IP source et activer fail2ban: sudo fail2ban-client set sshd banip IP",
+        'port scan': "Configurer fail2ban ou un IDS: sudo apt install fail2ban && sudo systemctl enable fail2ban",
+        'cpu': "Identifier le processus: top -b -n 1 | head -20 && killall -9 PROCESSUS ou redémarrer le service",
+        'disk': "Nettoyer l'espace: sudo du -sh /* | sort -h && sudo journalctl --vacuum-size=500M",
+        'memory': "Vérifier la mémoire: free -h && sudo systemctl restart service_consommant",
+        'vpn': "Vérifier les logs VPN: tail -f /var/log/openvpn.log et vérifier les certificats",
+        'sql': "Mettre à jour l'application avec des requêtes paramétrées (PDO/prepared statements)",
+        'injection': "Audit de sécurité immédiat et activation d'un WAF: sudo apt install modsecurity",
+        'ddos': "Activer rate limiting: iptables -A INPUT -p tcp --dport 80 -m limit --limit 25/minute -j ACCEPT",
+        'interface down': "Remonter l'interface: sudo ip link set eth0 up && sudo systemctl restart networking",
+        'slow query': "Optimiser la base: EXPLAIN ANALYZE SELECT...; CREATE INDEX idx_nom ON table(colonnes)",
+        'acl denied': "Vérifier les règles ACL: iptables -L -n -v | grep DROP && ajuster les règles",
+        'failed login': "Vérifier /var/log/auth.log et ajouter une règle fail2ban pour root",
+        'default': classification === 'critical' 
+            ? "Investigation immédiate requise. Vérifier les logs système dans /var/log/ et analyser les processus actifs."
+            : "Surveiller la situation. Analyser les tendances sur 1 heure et documenter l'incident."
+    };
+    
+    for (const [key, resolution] of Object.entries(resolutions)) {
+        if (msg.includes(key)) {
+            return resolution;
+        }
+    }
+    return resolutions.default;
+}
+
+// ─── Parsers avec fallback ─────────────────────────────────────────────────────
+function parseBatchResponse(raw, originalLogs) {
+    let cleaned = raw.replace(/```json|```/g, '').trim();
     const start = cleaned.indexOf('[');
     const end = cleaned.lastIndexOf(']');
-    if (start !== -1 && end !== -1) {
-        cleaned = cleaned.slice(start, end + 1);
-    }
-    
-    // Corriger les erreurs JSON courantes
-    cleaned = cleaned.replace(/"index":\d+,\s*"index":\d+/g, (match) => {
-        const firstIndex = match.match(/"index":(\d+)/);
-        return firstIndex ? `"index":${firstIndex[1]}` : match;
-    });
+    if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1);
     cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*\]/g, ']');
     
-    const parsed = JSON.parse(cleaned);
-    return parsed.map(item => ({
-        index: item.index,
-        classification: ['info', 'warning', 'critical'].includes(item.classification)
-            ? item.classification : 'info',
-        description: item.description || null,
-        resolution: item.resolution || null
-    }));
+    let parsed;
+    try {
+        parsed = JSON.parse(cleaned);
+    } catch (e) {
+        console.error('❌ JSON parsing error, using fallback');
+        // Fallback : créer des analyses par défaut
+        return originalLogs.map((log, idx) => ({
+            index: idx + 1,
+            classification: log.message.toLowerCase().includes('brute') || log.message.toLowerCase().includes('critical') ? 'critical' : 'info',
+            description: `Log: ${log.message.substring(0, 100)}`,
+            resolution: log.message.toLowerCase().includes('brute') || log.message.toLowerCase().includes('critical') 
+                ? generateDefaultResolution(log.message, 'critical') 
+                : null
+        }));
+    }
+    
+    return parsed.map(item => {
+        const log = originalLogs[item.index - 1];
+        const classification = item.classification;
+        let resolution = item.resolution;
+        let description = item.description;
+        
+        // Si classification est warning/critical et resolution est null/absent, générer une résolution par défaut
+        if (classification && classification !== 'info' && (!resolution || resolution === 'null' || resolution === null)) {
+            resolution = generateDefaultResolution(log?.message || '', classification);
+            console.log(`🔧 Fallback: Résolution générée pour ${classification} - ${log?.message?.substring(0, 50)}`);
+        }
+        
+        // Si description est null pour warning/critical, ajouter une description par défaut
+        if (classification && classification !== 'info' && (!description || description === 'null')) {
+            description = `Anomalie détectée: ${log?.message?.substring(0, 100)}`;
+        }
+        
+        return {
+            index: item.index,
+            classification: ['info', 'warning', 'critical'].includes(classification) ? classification : 'info',
+            description: description || null,
+            resolution: resolution || null
+        };
+    });
 }
 
-// ─── Batch Processor (automatique toutes les 5 min) ───────────────────────────
+function parseManualResponse(raw, originalLog) {
+    let cleaned = raw.replace(/```json|```/g, '').trim();
+    const start = cleaned.indexOf('{');
+    const end = cleaned.lastIndexOf('}');
+    if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1);
+    
+    let parsed;
+    try {
+        parsed = JSON.parse(cleaned);
+    } catch (e) {
+        console.error('❌ Manual parsing error, using fallback');
+        const classification = originalLog.message.toLowerCase().includes('brute') ? 'critical' : 'info';
+        return {
+            classification: classification,
+            description: `Log: ${originalLog.message.substring(0, 100)}`,
+            resolution: classification !== 'info' ? generateDefaultResolution(originalLog.message, classification) : null
+        };
+    }
+    
+    const classification = parsed.classification;
+    let resolution = parsed.resolution;
+    let description = parsed.description;
+    
+    // Fallback pour résolution manquante
+    if (classification && classification !== 'info' && (!resolution || resolution === 'null' || resolution === null)) {
+        resolution = generateDefaultResolution(originalLog.message, classification);
+        console.log(`🔧 Fallback manuel: Résolution générée pour ${classification}`);
+    }
+    
+    return {
+        classification: ['info', 'warning', 'critical'].includes(classification) ? classification : 'info',
+        description: description || null,
+        resolution: resolution || null
+    };
+}
+
+// ─── Batch Processor ───────────────────────────────────────────────────────────
 let isAnalysisRunning = false;
 
 async function processBatchAnalysis() {
     if (isAnalysisRunning) {
-        console.log('⏳ Batch déjà en cours, on attend le prochain cycle.');
+        console.log('⏳ Batch déjà en cours...');
         return;
     }
     isAnalysisRunning = true;
     
     try {
-        const logs = await Log.find({ analyzed: false })
-            .sort({ timestamp: 1 })
-            .limit(BATCH_LIMIT);
-            
+        const logs = await Log.find({ analyzed: false }).sort({ timestamp: 1 }).limit(BATCH_LIMIT);
         if (logs.length === 0) {
             console.log('📭 Batch : aucun log en attente.');
             return;
         }
 
-        console.log(`🔍 Batch : analyse de ${logs.length} logs via LiteLLM [${LITELLM_MODEL}]...`);
+        console.log(`🔍 Batch : analyse de ${logs.length} logs avec ${LITELLM_MODEL}...`);
         const prompt = buildBatchPrompt(logs);
         const rawResponse = await callLiteLLM(prompt);
 
         let results;
         try {
-            results = parseBatchResponse(rawResponse);
+            results = parseBatchResponse(rawResponse, logs);
         } catch (parseErr) {
-            console.error('❌ Réponse IA non parseable');
-            return;
+            console.error('❌ Réponse IA non parseable, utilisation du fallback');
+            // Fallback complet
+            results = logs.map((log, idx) => ({
+                index: idx + 1,
+                classification: log.message.toLowerCase().includes('brute') || log.message.toLowerCase().includes('critical') ? 'critical' : 
+                               (log.message.toLowerCase().includes('warning') ? 'warning' : 'info'),
+                description: `Analyse automatique: ${log.message.substring(0, 150)}`,
+                resolution: generateDefaultResolution(log.message, 'warning')
+            }));
         }
 
         let updatedCount = 0;
@@ -221,10 +383,7 @@ async function processBatchAnalysis() {
         
         console.log(`✅ Batch terminé : ${updatedCount}/${logs.length} logs analysés.`);
         
-        // Notifier les clients des logs mis à jour
-        const updatedLogs = await Log.find({ 
-            _id: { $in: logs.slice(0, updatedCount).map(l => l._id) } 
-        }).lean();
+        const updatedLogs = await Log.find({ _id: { $in: logs.slice(0, updatedCount).map(l => l._id) } }).lean();
         updatedLogs.forEach(log => io.emit('log_updated', log));
         
     } catch (err) {
@@ -287,27 +446,96 @@ app.use('/socket.io', express.static(path.join(__dirname, 'node_modules/socket.i
 app.get('/', (req, res) => res.sendFile(path.join(publicPath, 'index.html')));
 app.get('/analysis', (req, res) => res.sendFile(path.join(publicPath, 'analysis.html')));
 
-// Lister les modèles disponibles
-app.get('/api/models', async (req, res) => {
+// Analyse manuelle
+app.post('/api/analyse-log', async (req, res) => {
     try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (LITELLM_API_KEY) headers['Authorization'] = `Bearer ${LITELLM_API_KEY}`;
+        const { logId } = req.body;
+        if (!logId) return res.status(400).json({ error: 'logId requis' });
         
-        const response = await fetch(`${LITELLM_URL}/models`, { headers });
-        if (response.ok) {
-            const data = await response.json();
-            const models = data.data ? data.data.map(m => m.id) : [];
-            res.json({ models, default: LITELLM_MODEL });
-        } else {
-            throw new Error('API /models non disponible');
+        const log = await Log.findById(logId);
+        if (!log) return res.status(404).json({ error: 'Log introuvable' });
+        
+        const sev = log.classification || '';
+        const model = MODEL_BY_SEV[sev] || LITELLM_MODEL;
+        
+        console.log(`🔍 Analyse manuelle log ${logId} — sévérité: ${sev || 'inconnue'} — modèle: ${model}`);
+        
+        const prompt = buildManualPrompt(log, sev);
+        let rawResponse;
+        try {
+            rawResponse = await callLiteLLM(prompt, model);
+        } catch (err) {
+            console.error('❌ Erreur appel IA, utilisation fallback:', err.message);
+            const fallbackResult = {
+                classification: log.message.toLowerCase().includes('brute') ? 'critical' : 'info',
+                description: `Analyse automatique: ${log.message.substring(0, 150)}`,
+                resolution: generateDefaultResolution(log.message, 'warning')
+            };
+            const updated = await Log.findByIdAndUpdate(logId, {
+                $set: {
+                    analyzed: true,
+                    classification: fallbackResult.classification,
+                    description: fallbackResult.description,
+                    resolution: fallbackResult.resolution
+                }
+            }, { new: true });
+            if (updated) io.emit('log_updated', updated.toObject());
+            return res.json({
+                _id: updated._id,
+                classification: fallbackResult.classification,
+                description: fallbackResult.description,
+                resolution: fallbackResult.resolution,
+                model: 'fallback'
+            });
         }
-    } catch (err) {
-        res.json({ 
-            models: ['llama3:8b', 'phi3:mini', 'gemma4:26b', 'mistral:7b'],
-            default: LITELLM_MODEL,
-            error: err.message 
+        
+        let result;
+        try {
+            result = parseManualResponse(rawResponse, log);
+        } catch (parseErr) {
+            console.error('❌ Réponse IA non parseable, utilisation fallback:', rawResponse);
+            result = {
+                classification: log.message.toLowerCase().includes('brute') ? 'critical' : 'info',
+                description: `Analyse automatique: ${log.message.substring(0, 150)}`,
+                resolution: generateDefaultResolution(log.message, 'warning')
+            };
+        }
+        
+        const updated = await Log.findByIdAndUpdate(logId, {
+            $set: {
+                analyzed: true,
+                classification: result.classification,
+                description: result.description,
+                resolution: result.resolution
+            }
+        }, { new: true });
+        
+        if (updated) io.emit('log_updated', updated.toObject());
+        
+        res.json({
+            _id: updated._id,
+            classification: result.classification,
+            description: result.description,
+            resolution: result.resolution,
+            model: model
         });
+    } catch (err) {
+        console.error('❌ Erreur analyse manuelle:', err.message);
+        res.status(500).json({ error: err.message });
     }
+});
+
+// Modèles disponibles
+app.get('/api/models', async (req, res) => {
+    res.json({ 
+        models: [MODEL_INFO, MODEL_WARNING, MODEL_CRITICAL, LITELLM_MODEL],
+        default: LITELLM_MODEL,
+        by_severity: {
+            info: MODEL_INFO,
+            warning: MODEL_WARNING,
+            critical: MODEL_CRITICAL
+        }
+    });
 });
 
 // Logs avec filtres
@@ -370,7 +598,7 @@ app.get('/api/logs/export', async (req, res) => {
     }
 });
 
-// Logs analysés (page analysis.html)
+// Logs analysés
 app.get('/api/analysis', async (req, res) => {
     try {
         const hours = parseInt(req.query.hours) || 24;
@@ -436,7 +664,7 @@ app.post('/api/test-log', async (req, res) => {
     }
 });
 
-// Déclencher l'analyse manuelle
+// Déclencher l'analyse batch
 app.post('/api/run-analysis', async (req, res) => {
     try {
         processBatchAnalysis();
@@ -498,17 +726,12 @@ syslogServer.on('message', async (msg, rinfo) => {
         const parsed = parseSyslog(msg, `${rinfo.address}:${rinfo.port}`);
         const source = parsed.source;
         const message = parsed.message;
-        const uniqueHash = generateUniqueHash(source, message);
         
-        // Vérifier si ce log existe déjà dans les dernières 24h
-        const since = new Date(Date.now() - 24 * 3600000);
-        const existing = await Log.findOne({
-            uniqueHash: uniqueHash,
-            timestamp: { $gte: since }
-        });
+        const uniqueHash = generateUniqueHash(source, message);
+        const existing = await Log.findOne({ uniqueHash: uniqueHash });
         
         if (existing) {
-            console.log(`🔄 [DEDUP] Log ignoré de ${rinfo.address} : ${message.substring(0, 60)}...`);
+            console.log(`🔄 [DEDUP] Log ignoré (existe déjà en base) : ${message.substring(0, 60)}...`);
             return;
         }
         
@@ -523,7 +746,7 @@ syslogServer.on('message', async (msg, rinfo) => {
         
     } catch (err) {
         if (err.code === 11000) {
-            console.log(`🔄 [CONFLIT] Doublon ignoré (index unique)`);
+            console.log(`🔄 [CONFLIT] Doublon ignoré (index unique MongoDB)`);
         } else {
             console.error('❌ Erreur UDP :', err.message);
         }
@@ -535,12 +758,50 @@ syslogServer.bind(SYSLOG_PORT, '0.0.0.0', () => {
     console.log(`📡 UDP syslog écoute sur le port ${SYSLOG_PORT}`);
 });
 
+// ─── Script de nettoyage des doublons existants ───────────────────────────────
+async function cleanExistingDuplicates() {
+    try {
+        console.log('🧹 Nettoyage des doublons existants...');
+        
+        const logsWithoutHash = await Log.find({ uniqueHash: { $exists: false } });
+        for (const log of logsWithoutHash) {
+            const hash = generateUniqueHash(log.source, log.message);
+            await Log.updateOne({ _id: log._id }, { $set: { uniqueHash: hash } });
+        }
+        console.log(`✅ ${logsWithoutHash.length} logs sans hash mis à jour`);
+        
+        const duplicates = await Log.aggregate([
+            { $group: { _id: "$uniqueHash", ids: { $push: "$_id" }, count: { $sum: 1 } } },
+            { $match: { count: { $gt: 1 } } }
+        ]);
+        
+        let deletedCount = 0;
+        for (const dup of duplicates) {
+            const logs = await Log.find({ _id: { $in: dup.ids } }).sort({ timestamp: -1 });
+            const keepId = logs[0]._id;
+            const deleteIds = dup.ids.filter(id => id.toString() !== keepId.toString());
+            
+            if (deleteIds.length) {
+                await Log.deleteMany({ _id: { $in: deleteIds } });
+                deletedCount += deleteIds.length;
+                console.log(`🗑️ Supprimé ${deleteIds.length} doublons pour hash ${dup._id}`);
+            }
+        }
+        
+        console.log(`✅ Nettoyage terminé : ${deletedCount} doublons supprimés`);
+    } catch (err) {
+        console.error('❌ Erreur nettoyage:', err.message);
+    }
+}
+
 // ─── Arrêt propre ──────────────────────────────────────────────────────────────
 let analysisInterval = null;
+let rotationInterval = null;
 
 function shutdown() {
     console.log('🛑 Arrêt en cours...');
     if (analysisInterval) clearInterval(analysisInterval);
+    if (rotationInterval) clearInterval(rotationInterval);
     http.close();
     syslogServer.close();
     mongoose.connection.close().then(() => {
@@ -561,10 +822,14 @@ async function startServer() {
     }
     
     await connectWithRetry();
+    await cleanExistingDuplicates();
     
     analysisInterval = setInterval(processBatchAnalysis, 5 * 60 * 1000);
     console.log('🚀 Lancement du batch initial...');
     processBatchAnalysis();
+    
+    rotationInterval = setInterval(rotateLogs, 24 * 3600000);
+    console.log('🔄 Rotation des logs programmée toutes les 24h');
     
     http.listen(3000, '0.0.0.0', () => {
         console.log('🌐 Interface web sur http://localhost:3000');

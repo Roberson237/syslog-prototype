@@ -355,7 +355,7 @@ input[type="text"] { min-width: 280px; }
     <div class="filters-bar">
       <div class="filter-group">
         <div class="filter-label">Time Range</div>
-        <select id="fTime" onchange="onTimeChange()">
+        <select id="fTime">
           <option value="1">Last Hour</option>
           <option value="24" selected>Last 24 Hours</option>
           <option value="168">Last Week</option>
@@ -364,7 +364,7 @@ input[type="text"] { min-width: 280px; }
       </div>
       <div class="filter-group">
         <div class="filter-label">Severity</div>
-        <select id="fSeverity" onchange="renderFiltered()">
+        <select id="fSeverity">
           <option value="">All</option>
           <option value="info">Info</option>
           <option value="warning">Warning</option>
@@ -373,11 +373,11 @@ input[type="text"] { min-width: 280px; }
       </div>
       <div class="filter-group">
         <div class="filter-label">Search Analysis</div>
-        <input type="text" id="fSearch" placeholder="Search in messages, description, resolution..." oninput="debounceFilter()">
+        <input type="text" id="fSearch" placeholder="Search in messages, description, resolution...">
       </div>
       <div class="filter-actions">
-        <button class="btn btn-primary" onclick="renderFiltered()">Apply</button>
-        <button class="btn" onclick="resetFilters()">Reset</button>
+        <button class="btn btn-primary" id="applyFiltersBtn">Apply</button>
+        <button class="btn" id="resetFiltersBtn">Reset</button>
       </div>
     </div>
 
@@ -439,7 +439,7 @@ input[type="text"] { min-width: 280px; }
               </div>
               <div class="depth-row-meta">
                 <span class="depth-count" id="depthCountCritical" style="color:var(--danger)">—</span>
-                <span class="model-pill critical">🤖 deepseek</span>
+                <span class="model-pill critical">🤖 gemma</span>
               </div>
             </div>
             <div class="depth-bar-track"><div class="depth-bar-fill critical" id="depthBarCritical" style="width:0%"></div></div>
@@ -447,7 +447,7 @@ input[type="text"] { min-width: 280px; }
           <div class="depth-legend">
             <div class="depth-legend-item"><span class="model-pill info" style="font-size:.6rem">🤖 llama3:8b</span> Quick — événements normaux</div>
             <div class="depth-legend-item"><span class="model-pill warning" style="font-size:.6rem">🤖 llama3:70b</span> Standard — anomalies</div>
-            <div class="depth-legend-item"><span class="model-pill critical" style="font-size:.6rem">🤖 deepseek</span> Deep — incidents critiques</div>
+            <div class="depth-legend-item"><span class="model-pill critical" style="font-size:.6rem">🤖 gemma</span> Deep — incidents critiques</div>
           </div>
         </div>
       </div>
@@ -459,7 +459,7 @@ input[type="text"] { min-width: 280px; }
         <div class="logs-toolbar-title">Analyzed Logs</div>
         <span class="logs-count" id="logsCount"></span>
         <div class="toolbar-right">
-          <button class="btn" onclick="loadAnalysis()">↻ Refresh</button>
+          <button class="btn" id="refreshBtn">↻ Refresh</button>
         </div>
       </div>
       <div id="logEntries">
@@ -508,12 +508,12 @@ input[type="text"] { min-width: 280px; }
 <script src="/socket.io/socket.io.js"></script>
 <script>
 // ── Config ─────────────────────────────────────────────────────────────────────
-const MODEL_BY_SEV  = { info:'llama3:8b', warning:'llama3:70b', critical:'deepseek' };
+const MODEL_BY_SEV  = { info:'llama3:8b', warning:'phi3:mini', critical:'gemma4:26b' };
 const DEPTH_LABEL   = { info:'QUICK', warning:'STANDARD', critical:'DEEP' };
 const DEPTH_CSS     = { info:'depth-quick', warning:'depth-standard', critical:'depth-deep' };
 
 // ── State ──────────────────────────────────────────────────────────────────────
-let allLogs     = [];
+let allLogs = [];
 let currentHours = '24';
 
 // ── Theme ──────────────────────────────────────────────────────────────────────
@@ -533,7 +533,7 @@ function applyTheme() {
 }
 applyTheme();
 
-// ── Synthèse Vocale (Speech Synthesis) ────────────────────────────────────────
+// ── Synthèse Vocale ────────────────────────────────────────────────────────────
 let currentUtterance = null;
 
 function stopSpeaking() {
@@ -647,13 +647,6 @@ function speakCurrentModal() {
     speakLogDetails(currentModalLog._id);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    const modalSpeakBtn = document.getElementById('modalSpeakBtn');
-    if (modalSpeakBtn) {
-        modalSpeakBtn.onclick = speakCurrentModal;
-    }
-});
-
 // ── Utils ──────────────────────────────────────────────────────────────────────
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function fmtDateTime(ts) {
@@ -723,62 +716,78 @@ function renderEntry(log) {
   </div>`;
 }
 
-// ── Render filtré côté client (instantané) ─────────────────────────────────────
+// ── Render filtré (cœur du filtrage) ──────────────────────────────────────────
 function renderFiltered() {
-  const sevFilter    = document.getElementById('fSeverity').value;
+  const sevFilter = document.getElementById('fSeverity').value;
   const searchFilter = document.getElementById('fSearch').value.toLowerCase().trim();
-
-  // Filtrer les logs analysés UNIQUEMENT
-  const filtered = allLogs.filter(log => {
-    // Ne montrer que les logs analysés (analyzed = true ET classification non null)
+  const timeSelect = document.getElementById('fTime');
+  const selectedHours = timeSelect ? timeSelect.value : '24';
+  
+  // Filtrer par période
+  const hoursAgo = parseInt(selectedHours);
+  const cutoffTime = new Date(Date.now() - hoursAgo * 3600000);
+  
+  let filtered = allLogs.filter(log => {
+    // Vérifier que le log est analysé
     if (!log.analyzed || !log.classification) return false;
+    
+    // Filtre période
+    const logTime = new Date(log.timestamp);
+    if (logTime < cutoffTime) return false;
+    
+    // Filtre sévérité
     if (sevFilter && log.classification !== sevFilter) return false;
+    
+    // Filtre recherche
     if (searchFilter) {
-      const hay = [log.message||'', log.description||'', log.resolution||'', log.source||''].join(' ').toLowerCase();
-      if (!hay.includes(searchFilter)) return false;
+      const haystack = [
+        log.message || '',
+        log.description || '',
+        log.resolution || '',
+        log.source || ''
+      ].join(' ').toLowerCase();
+      if (!haystack.includes(searchFilter)) return false;
     }
+    
     return true;
   });
-
-  const container = document.getElementById('logEntries');
-  const count     = document.getElementById('logsCount');
-
-  if (!filtered.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">Aucun log analysé pour la période sélectionnée.<br>Les logs sont analysés automatiquement toutes les 5 minutes.</div></div>`;
-    count.textContent = '';
-    return;
-  }
   
   // Trier du plus récent au plus ancien
   filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   
-  count.textContent = `${filtered.length} log${filtered.length>1?'s':''}`;
+  const container = document.getElementById('logEntries');
+  const countSpan = document.getElementById('logsCount');
+  
+  if (!filtered.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">Aucun log analysé pour les filtres sélectionnés.<br>Les logs sont analysés automatiquement toutes les 5 minutes.</div></div>`;
+    countSpan.textContent = '';
+    return;
+  }
+  
+  countSpan.textContent = `${filtered.length} log${filtered.length > 1 ? 's' : ''}`;
   container.innerHTML = filtered.map(renderEntry).join('');
 }
 
-let debTimer = null;
-function debounceFilter() { clearTimeout(debTimer); debTimer = setTimeout(renderFiltered, 220); }
-
-// ── Chargement API ────────────────────────────────────────────────────────────
+// ─── Chargement API ────────────────────────────────────────────────────────────
 async function loadAnalysis() {
   const container = document.getElementById('logEntries');
   container.innerHTML = `
-    <div class="skeleton-entry"><div class="skeleton-line" style="width:28%;margin-bottom:10px"></div><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:55%"></div></div>
-    <div class="skeleton-entry"><div class="skeleton-line" style="width:22%;margin-bottom:10px"></div><div class="skeleton-line" style="width:91%"></div><div class="skeleton-line" style="width:47%"></div></div>
-    <div class="skeleton-entry"><div class="skeleton-line" style="width:35%;margin-bottom:10px"></div><div class="skeleton-line" style="width:74%"></div><div class="skeleton-line" style="width:66%"></div></div>`;
+    <div class="skeleton-entry"><div class="skeleton-line" style="width:28%"></div><div class="skeleton-line" style="width:82%"></div><div class="skeleton-line" style="width:55%"></div></div>
+    <div class="skeleton-entry"><div class="skeleton-line" style="width:22%"></div><div class="skeleton-line" style="width:91%"></div><div class="skeleton-line" style="width:47%"></div></div>`;
 
   await loadStats();
 
   try {
-    const params = new URLSearchParams({ hours: currentHours, limit: 500 });
-    const res    = await fetch(`/api/analysis?${params}`);
+    const hours = document.getElementById('fTime').value;
+    const params = new URLSearchParams({ hours: hours, limit: 500 });
+    const res = await fetch(`/api/analysis?${params}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const logs = await res.json();
     
-    // Ne garder que les logs analysés (par sécurité)
+    // Ne garder que les logs analysés
     allLogs = logs.filter(log => log.analyzed === true && log.classification !== null);
     
-    console.log(`📊 ${allLogs.length} logs analysés chargés pour les ${currentHours} dernières heures`);
+    console.log(`📊 ${allLogs.length} logs analysés chargés pour les ${hours} dernières heures`);
     
     renderFiltered();
   } catch(err) {
@@ -787,19 +796,14 @@ async function loadAnalysis() {
   }
 }
 
-function onTimeChange() {
-  const newHours = document.getElementById('fTime').value;
-  if (newHours !== currentHours) { 
-    currentHours = newHours; 
-    loadAnalysis(); 
-  }
+function applyFilters() {
+  renderFiltered();
 }
 
 function resetFilters() {
-  document.getElementById('fTime').value     = '24';
+  document.getElementById('fTime').value = '24';
   document.getElementById('fSeverity').value = '';
-  document.getElementById('fSearch').value   = '';
-  currentHours = '24';
+  document.getElementById('fSearch').value = '';
   loadAnalysis();
 }
 
@@ -809,8 +813,8 @@ async function loadStats() {
     const s = await (await fetch('/api/stats')).json();
     document.getElementById('statAnalyzed').textContent = s.analyzed ?? '—';
     document.getElementById('statCritical').textContent = s.critical ?? '—';
-    document.getElementById('statSources').textContent  = s.sources  ?? '—';
-    document.getElementById('statDeep').textContent     = s.deep     ?? '0';
+    document.getElementById('statSources').textContent = s.sources ?? '—';
+    document.getElementById('statDeep').textContent = s.deep ?? '0';
     updateDonut(s);
     updateDepthBars(s);
   } catch(e) {
@@ -820,67 +824,79 @@ async function loadStats() {
 
 function updateDonut(s) {
   const total = s.analyzed || 1;
-  const circ  = 2 * Math.PI * 60;
-  const info  = (s.info||0)/total*circ, warn=(s.warning||0)/total*circ, crit=(s.critical||0)/total*circ;
+  const circ = 2 * Math.PI * 60;
+  const info = ((s.info||0)/total)*circ;
+  const warn = ((s.warning||0)/total)*circ;
+  const crit = ((s.critical||0)/total)*circ;
+  
   document.getElementById('donutTotal').textContent = s.analyzed || 0;
-  document.getElementById('donutInfo').setAttribute('stroke-dasharray',    `${info} ${circ-info}`);
-  document.getElementById('donutInfo').setAttribute('stroke-dashoffset',   '0');
+  document.getElementById('donutInfo').setAttribute('stroke-dasharray', `${info} ${circ-info}`);
+  document.getElementById('donutInfo').setAttribute('stroke-dashoffset', '0');
   document.getElementById('donutWarning').setAttribute('stroke-dasharray', `${warn} ${circ-warn}`);
-  document.getElementById('donutWarning').setAttribute('stroke-dashoffset',`${circ-info}`);
-  document.getElementById('donutCritical').setAttribute('stroke-dasharray',`${crit} ${circ-crit}`);
-  document.getElementById('donutCritical').setAttribute('stroke-dashoffset',`${circ-info-warn}`);
+  document.getElementById('donutWarning').setAttribute('stroke-dashoffset', `${circ-info}`);
+  document.getElementById('donutCritical').setAttribute('stroke-dasharray', `${crit} ${circ-crit}`);
+  document.getElementById('donutCritical').setAttribute('stroke-dashoffset', `${circ-info-warn}`);
 }
 
 function updateDepthBars(s) {
-  const i = s.info||0, w = s.warning||0, c = s.critical||0;
+  const i = s.info || 0;
+  const w = s.warning || 0;
+  const c = s.critical || 0;
   const maxVal = Math.max(i, w, c, 1);
-  const pct = v => Math.max(v>0?3:0, Math.round(v/maxVal*100));
+  const pct = v => Math.max(v > 0 ? 3 : 0, Math.round(v / maxVal * 100));
+  
   requestAnimationFrame(() => {
-    document.getElementById('depthBarInfo').style.width     = pct(i)+'%';
-    document.getElementById('depthBarWarning').style.width  = pct(w)+'%';
-    document.getElementById('depthBarCritical').style.width = pct(c)+'%';
+    document.getElementById('depthBarInfo').style.width = pct(i) + '%';
+    document.getElementById('depthBarWarning').style.width = pct(w) + '%';
+    document.getElementById('depthBarCritical').style.width = pct(c) + '%';
   });
-  document.getElementById('depthCountInfo').textContent     = i;
-  document.getElementById('depthCountWarning').textContent  = w;
+  document.getElementById('depthCountInfo').textContent = i;
+  document.getElementById('depthCountWarning').textContent = w;
   document.getElementById('depthCountCritical').textContent = c;
 }
 
-// ── Socket.IO — mises à jour temps réel ────────────────────────────────────────
-try {
-  const socket = io({ transports: ['websocket','polling'] });
+// ─── Socket.IO — mises à jour temps réel ────────────────────────────────────────
+const socket = io({ transports: ['websocket', 'polling'] });
 
-  socket.on('log_updated', (log) => {
-    console.log('📢 Log mis à jour:', log._id, log.classification);
-    loadStats();
-    
-    // Mettre à jour ou ajouter le log
-    const idx = allLogs.findIndex(l => l._id === log._id);
-    if (idx !== -1) {
-      allLogs[idx] = log;
-    } else if (log.analyzed && log.classification) {
-      allLogs.unshift(log);
-      // Limiter à 500 logs pour éviter les problèmes de performance
-      if (allLogs.length > 500) allLogs.pop();
-    }
-    
-    renderFiltered();
-    
-    // Animation flash sur l'entrée mise à jour
-    const el = document.querySelector(`.log-entry[data-id="${log._id}"]`);
-    if (el) { 
-      el.style.transition='background .3s'; 
-      el.style.background='rgba(88,166,255,0.15)'; 
-      setTimeout(()=>{ el.style.background=''; }, 1800); 
-    }
+socket.on('log_updated', (log) => {
+  console.log('📢 Log mis à jour:', log._id, log.classification);
+  loadStats();
+  
+  const idx = allLogs.findIndex(l => l._id === log._id);
+  if (idx !== -1) {
+    allLogs[idx] = log;
+  } else if (log.analyzed && log.classification) {
+    allLogs.unshift(log);
+    if (allLogs.length > 500) allLogs.pop();
+  }
+  
+  renderFiltered();
+  
+  const el = document.querySelector(`.log-entry[data-id="${log._id}"]`);
+  if (el) {
+    el.style.transition = 'background .3s';
+    el.style.background = 'rgba(88,166,255,0.15)';
+    setTimeout(() => { el.style.background = ''; }, 1800);
+  }
+});
+
+// ─── Event Listeners ──────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('applyFiltersBtn').addEventListener('click', applyFilters);
+  document.getElementById('resetFiltersBtn').addEventListener('click', resetFilters);
+  document.getElementById('refreshBtn').addEventListener('click', loadAnalysis);
+  document.getElementById('fTime').addEventListener('change', loadAnalysis);
+  document.getElementById('fSearch').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') applyFilters();
   });
-} catch(e) {
-  console.error('Socket.IO error:', e);
-}
+  
+  const modalSpeakBtn = document.getElementById('modalSpeakBtn');
+  if (modalSpeakBtn) modalSpeakBtn.onclick = speakCurrentModal;
+});
 
 // ── Init ───────────────────────────────────────────────────────────────────────
 loadAnalysis();
 setInterval(loadStats, 30000);
-setInterval(loadAnalysis, 60000); // Rafraîchir toutes les minutes
 </script>
 </body>
 </html>
